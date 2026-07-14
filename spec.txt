@@ -1,0 +1,11 @@
+TPT Bastion (Infrastructure as Code)
+The "Post-Terraform"
+In 2023, HashiCorp changed Terraform's license from MPL to BSL, effectively making it non-open-source and restricting commercial use. This was a massive betrayal of the open-source community and created uncertainty for thousands of companies. While OpenTofu exists as a fork, it's playing catch-up and lacks innovation. Infrastructure as Code is the foundation of modern cloud operations, and leaving it in the hands of a company that has shown it will restrict community use is a strategic risk.
+TPT Bastion is a next-generation Infrastructure as Code platform built from scratch in Rust, designed for the cloud-native era. It features native support for all major clouds (AWS, GCP, Azure) plus Kubernetes and Terraform-compatible providers. Instead of HCL, Bastion uses a modern, type-safe configuration language that compiles to an intermediate representation, catching errors at compile time rather than runtime. It includes built-in state management with encrypted, versioned state files (no separate backend needed), real-time drift detection with automatic reconciliation, and native integration with TPT Keystone for state storage and TPT Flux for event-driven infrastructure updates.
+By releasing TPT Bastion under the Apache 2.0 license, we give the community a truly open, innovative alternative to Terraform. Bastion provides the same declarative infrastructure management that teams rely on, but with modern architecture, better performance, and a guarantee that the license will never be restricted. It's infrastructure as code that you actually own.
+Tech Stack:
+Core Engine: Rust for performance and safety
+Configuration Language: Custom DSL compiled to IR, with TypeScript/Python bindings
+Provider System: Plugin architecture using Wasm for provider isolation
+State Management: Native TPT Keystone integration for encrypted, versioned state
+Execution Engine: Parallel, dependency-aware graph execution with rollback support
