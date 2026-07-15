@@ -2,7 +2,7 @@
 
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = ["crates/*", "providers/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -21,6 +21,12 @@ serde_json = "1"
 thiserror = "1"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+rayon = "1"
+rand = "0.8"
+aes-gcm = "0.10"
+argon2 = "0.5"
+zeroize = "1"
+sha2 = "0.10"
 
 [profile.release]
 opt-level = 3

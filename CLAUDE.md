@@ -10,8 +10,10 @@ never be relicensed against the community. See `README.md` for the pitch and `to
 full phased roadmap (Phase 0 through Phase 10, zero to public launch) — check `todo.md` before
 starting work to see what phase is in progress and what's already checked off.
 
-Only the DSL → IR compiler pipeline exists today (Phases 0–1, partially). There is no execution
-engine, state management, provider system, or language bindings yet — don't assume they exist.
+Only the DSL → IR compiler pipeline plus the execution-engine foundation exist today (Phases 0–3,
+partially). The `bastion-engine` crate builds a dependency graph and a dry-run `plan` from IR. There
+is no apply runtime, state management, provider system, or language bindings yet — don't assume they
+exist.
 
 ## Commands
 
@@ -23,6 +25,7 @@ cargo test -p bastion-dsl reports_lex_error_with_location   # run a single test 
 cargo fmt --all -- --check              # CI's fmt check
 cargo clippy --workspace --all-targets -- -D warnings   # CI's lint check (warnings are errors)
 cargo run --bin bastion -- compile examples/aws_s3.bcl  # compile a .bcl file to IR JSON
+cargo run --bin bastion -- plan examples/aws_s3.bcl     # dry-run plan from a .bcl file
 ```
 
 CI (`.github/workflows/ci.yml`) runs build+test and fmt+clippy (with `-D warnings`) as separate
@@ -30,8 +33,9 @@ jobs on every push/PR to `main`. Match this locally before considering work done
 
 ## Architecture
 
-Three crates under `crates/`, forming a strict pipeline: `bastion-dsl` depends on `bastion-ir`;
-`bastion-cli` depends on `bastion-dsl`. Nothing depends on `bastion-cli`.
+Four crates under `crates/`, forming a strict pipeline: `bastion-dsl` depends on `bastion-ir`;
+`bastion-engine` depends on `bastion-ir`; `bastion-cli` depends on `bastion-dsl` and
+`bastion-engine`. Nothing depends on `bastion-cli`.
 
 - **`bastion-ir`** — the versioned, serializable IR (`Document`, `Resource`, `Value`, etc.) that
   everything downstream (execution engine, state backends, providers, future TS/Python bindings)
@@ -52,9 +56,16 @@ Three crates under `crates/`, forming a strict pipeline: `bastion-dsl` depends o
   compile errors). All errors are `error::DslError`, split into `Lex`/`Parse`/`Compile` variants
   so the CLI can show the most relevant diagnostic; lex/parse errors carry line/col.
 
-- **`bastion-cli`** — the `bastion` binary (clap-based). Currently only has a `compile` subcommand
-  that reads a `.bcl` file (or `-` for stdin) and prints the resulting IR as pretty JSON. Later
-  roadmap phases (plan/apply/state) will add subcommands here.
+- **`bastion-engine`** — the execution core. `graph.rs::DepGraph` builds a dependency graph purely
+  from the IR's structured `Value::Reference` values and topologically orders it (Kahn's
+  algorithm) with cycle and unknown-reference detection; `plan.rs::Plan` walks that order into a
+  sequence of `Action`s. `lib.rs::plan_document()` is the convenience entry point (validates IR
+  compatibility, builds graph, returns a plan). There is no real apply yet — providers (Phase 6)
+  are required to mutate infrastructure.
+
+- **`bastion-cli`** — the `bastion` binary (clap-based). Has `compile` (`.bcl` → IR JSON) and
+  `plan` (dependency-ordered dry-run plan) subcommands. Later roadmap phases (apply/state) will
+  add subcommands here.
 
 `examples/*.bcl` holds example DSL documents (`.bcl` extension) used as fixtures/demos — see
 `aws_s3.bcl` for the current canonical shape of `config`/`variable`/`resource`/`output` blocks and

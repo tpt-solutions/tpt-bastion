@@ -21,10 +21,32 @@ pub enum EngineError {
     #[error("unknown reference target `{0}` (no such resource or module)")]
     UnknownReference(String),
 
-    /// A dependency cycle was detected while ordering the graph.
-    #[error("dependency cycle detected: {0:?}")]
+    /// The dependency graph contains a cycle; the listed ids form the cycle.
+    #[error("dependency cycle detected: {}", .path.join(" -> "))]
     Cycle {
-        /// The cyclic path of node ids, from the repeated node back to itself.
+        /// The ids participating in the cycle, in order.
         path: Vec<String>,
     },
+
+    /// A reference could not be resolved against already-applied resources at
+    /// apply time (e.g. the target has no such attribute).
+    #[error("could not resolve reference to `{base}`: {detail}")]
+    ReferenceResolution {
+        /// The base identifier the reference pointed at.
+        base: String,
+        /// Human-readable reason the resolution failed.
+        detail: String,
+    },
+
+    /// A provider reported a failure while applying or destroying a resource.
+    #[error("provider error: {0}")]
+    Provider(String),
+
+    /// A state file could not be read or written.
+    #[error("state io error: {0}")]
+    StateIo(String),
+
+    /// A state file could not be serialized or parsed.
+    #[error("state serialization error: {0}")]
+    StateEncode(String),
 }

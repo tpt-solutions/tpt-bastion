@@ -1,0 +1,37 @@
+{
+  "name": "bastion",
+  "version": "0.1.0",
+  "description": "TypeScript bindings for TPT Bastion — author infrastructure in TypeScript and drive the bastion CLI",
+  "license": "Apache-2.0 OR MIT",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "keywords": [
+    "iac",
+    "infrastructure",
+    "terraform",
+    "bastion",
+    "devops"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tpt/bastion.git",
+    "directory": "bindings/typescript"
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "example": "node --experimental-strip-types examples/aws_s3.ts"
+  }
+}

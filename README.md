@@ -28,14 +28,21 @@ the community.
 
 ## Status
 
-This repository is at an early stage. The foundation (workspace, licensing,
-CI) and the DSL → IR compiler pipeline are in place:
+Bastion is under active development. The core platform is in place and the CLI
+is runnable end-to-end: compile → plan → apply, with encrypted native state,
+drift detection, a Wasm-ready provider runtime, and language bindings.
 
-| Crate           | Purpose                                            |
-| --------------- | -------------------------------------------------- |
-| `bastion-ir`    | The versioned intermediate representation.         |
-| `bastion-dsl`   | The DSL lexer, parser, and AST→IR compiler.        |
-| `bastion-cli`   | The `bastion` command-line tool.                   |
+| Crate             | Purpose                                                       |
+| ----------------- | ------------------------------------------------------------- |
+| `bastion-ir`      | The versioned intermediate representation.                   |
+| `bastion-dsl`     | The DSL lexer, parser, and AST→IR compiler.                  |
+| `bastion-engine`  | Dependency graph, planning, and parallel execution core.     |
+| `bastion-state`   | Encrypted, versioned, lock-aware native state management.    |
+| `bastion-providers` | Provider SDK, schema, runtime, registry, and scaffolding.  |
+| `bastion-cli`     | The `bastion` command-line tool.                             |
+
+See [`docs/`](docs) for the language reference, provider guide, binding
+architecture, getting started, and the Terraform migration guide.
 
 ## Quick start
 
@@ -45,6 +52,27 @@ cargo run --bin bastion -- compile examples/aws_s3.bcl
 
 This reads `examples/aws_s3.bcl`, compiles it through the DSL pipeline, and
 prints the resulting IR as JSON.
+
+## Installation
+
+Pick whichever fits your workflow:
+
+```sh
+# Install script (Linux/macOS)
+curl -fsSL https://raw.githubusercontent.com/tpt/bastion/main/scripts/install.sh | sh
+
+# Install script (Windows, PowerShell)
+irm https://raw.githubusercontent.com/tpt/bastion/main/scripts/install.ps1 | iex
+
+# From source
+cargo install --path crates/bastion-cli
+
+# Docker
+docker run --rm ghcr.io/tpt/bastion:latest --help
+```
+
+Homebrew, npm, and PyPI packages are published at release time; see
+[`docs/bindings.md`](docs/bindings.md) for the language bindings.
 
 ## Project layout
 

@@ -10,6 +10,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
+documentation = "https://docs.rs/bastion-dsl"
 keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
@@ -21,3 +22,8 @@ thiserror.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+cargo-arg = "--all-features"

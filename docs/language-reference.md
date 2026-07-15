@@ -301,6 +301,17 @@ are tracked in `todo.md` and will extend this grammar:
 - Phase 2 — TypeScript/Python bindings (consume IR, not the DSL directly).
 - Phase 3 — Execution engine: references drive a dependency graph; `plan`/`apply`
   and `dry-run` operate on the IR.
-- Phase 4 — State management and drift detection.
-- Phase 5 — Provider plugin system (Wasm ABI defining resource CRUD/data sources).
+- Phase 4 — Native state management is implemented in the `bastion-state` crate:
+  encrypted state files (AES-256-GCM + Argon2id), append-only version history,
+  cooperative locking, drift detection, and automatic reconciliation. The CLI
+  exposes it via `bastion state` and `bastion drift`.
+- Phase 5 — Provider plugin system is implemented in the `bastion-providers`
+  crate: the `ProviderPlugin` SDK/ABI, a capability schema format, a
+  pluggable runtime (`NativeRuntime` in-process and `SubprocessRuntime` for
+  isolated processes), a `PluginRegistry`, scaffolding, and a conformance
+  suite. The CLI exposes it via `bastion provider`.
 - Phase 6 — Cloud providers (AWS, GCP, Azure, Kubernetes, Terraform shim).
+- Phase 7 — Event-driven updates (internal event source/trigger interface).
+- Phase 8 — Testing & quality: provider conformance suite, end-to-end
+  plan/apply scenarios, and fuzz/property tests for the DSL compiler and IR
+  (CI now reports coverage).

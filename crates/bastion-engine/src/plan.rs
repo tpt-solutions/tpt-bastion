@@ -3,6 +3,7 @@
 //! Execution plan construction from a dependency-ordered graph.
 
 use crate::error::EngineError;
+use crate::state::State;
 use bastion_ir::{Document, Resource};
 use std::collections::HashMap;
 
@@ -59,20 +60,31 @@ impl Plan {
     /// Build a plan from a dependency-ordered list of node ids.
     ///
     /// Node ids that are resource ids become actions; output nodes are derived
-    /// at apply time and produce no action. With no prior state available yet
-    /// (Phase 4), every resource plans as a [`ActionKind::Create`].
-    pub fn from_order(doc: &Document, order: &[String]) -> Result<Plan, EngineError> {
-        let by_id: HashMap<&str, &Resource> = doc
-            .resources
-            .iter()
-            .map(|r| (r.id.as_str(), r))
-            .collect();
+    /// at apply time and produce no action. Resources are diffed against
+    /// `prior` state so the plan contains [`ActionKind::Create`],
+    /// [`ActionKind::Update`], and [`ActionKind::Delete`] actions as
+    /// appropriate. Passing an empty state (the default) plans every resource
+    /// as a create.
+    pub fn from_order(
+        doc: &Document,
+        order: &[String],
+        prior: &State,
+    ) -> Result<Plan, EngineError> {
+        let by_id: HashMap<&str, &Resource> =
+            doc.resources.iter().map(|r| (r.id.as_str(), r)).collect();
+        let prior_ids: std::collections::HashSet<&str> =
+            prior.resources.iter().map(|r| r.id.as_str()).collect();
 
         let mut actions = Vec::with_capacity(order.len());
         for node in order {
             if let Some(res) = by_id.get(node.as_str()) {
+                let kind = if prior_ids.contains(res.id.as_str()) {
+                    ActionKind::Update
+                } else {
+                    ActionKind::Create
+                };
                 actions.push(Action {
-                    kind: ActionKind::Create,
+                    kind,
                     id: res.id.clone(),
                     type_name: Some(res.type_name.clone()),
                 });
@@ -81,9 +93,31 @@ impl Plan {
             // applied, once the resources they reference exist.
         }
 
-        let to_create = actions.iter().filter(|a| a.kind == ActionKind::Create).count();
-        let to_update = actions.iter().filter(|a| a.kind == ActionKind::Update).count();
-        let to_delete = actions.iter().filter(|a| a.kind == ActionKind::Delete).count();
+        // Resources present in prior state but absent from the document are
+        // planned for deletion, in reverse topological order so that dependents
+        // are destroyed before the resources they depend on.
+        for prior_res in prior.resources.iter().rev() {
+            if !by_id.contains_key(prior_res.id.as_str()) {
+                actions.push(Action {
+                    kind: ActionKind::Delete,
+                    id: prior_res.id.clone(),
+                    type_name: Some(prior_res.type_name.clone()),
+                });
+            }
+        }
+
+        let to_create = actions
+            .iter()
+            .filter(|a| a.kind == ActionKind::Create)
+            .count();
+        let to_update = actions
+            .iter()
+            .filter(|a| a.kind == ActionKind::Update)
+            .count();
+        let to_delete = actions
+            .iter()
+            .filter(|a| a.kind == ActionKind::Delete)
+            .count();
 
         Ok(Plan {
             actions,
@@ -104,13 +138,9 @@ impl Plan {
             "Plan: {} to create, {} to update, {} to delete.\n",
             self.to_create, self.to_update, self.to_delete
         ));
-        out.push_str("\n");
+        out.push('\n');
         for (i, action) in self.actions.iter().enumerate() {
-            let ty = action
-                .type_name
-                .as_ref()
-                .map(String::as_str)
-                .unwrap_or("?");
+            let ty = action.type_name.as_deref().unwrap_or("?");
             out.push_str(&format!(
                 "  {:>2}. {} {} ({})\n",
                 i + 1,

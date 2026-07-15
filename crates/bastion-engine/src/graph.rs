@@ -56,19 +56,20 @@ impl DepGraph {
         let mut deps: HashMap<String, Vec<String>> =
             nodes.iter().map(|n| (n.clone(), Vec::new())).collect();
 
-        let mut connect = |node: &str, base: &str, known: &HashMap<&str, &str>| -> Result<(), EngineError> {
-            match known.get(base) {
-                Some(&target) if target != node => {
-                    let entry = deps.get_mut(node).expect("node registered");
-                    if !entry.contains(&target.to_string()) {
-                        entry.push(target.to_string());
+        let mut connect =
+            |node: &str, base: &str, known: &HashMap<&str, &str>| -> Result<(), EngineError> {
+                match known.get(base) {
+                    Some(&target) if target != node => {
+                        let entry = deps.get_mut(node).expect("node registered");
+                        if !entry.contains(&target.to_string()) {
+                            entry.push(target.to_string());
+                        }
+                        Ok(())
                     }
-                    Ok(())
+                    Some(_) => Ok(()), // self-reference, ignore
+                    None => Err(EngineError::UnknownReference(base.to_string())),
                 }
-                Some(_) => Ok(()), // self-reference, ignore
-                None => Err(EngineError::UnknownReference(base.to_string())),
-            }
-        };
+            };
 
         for r in &doc.resources {
             for (base, _) in references_in_attrs(&r.attributes) {
@@ -83,6 +84,45 @@ impl DepGraph {
         }
 
         Ok(DepGraph { nodes, deps })
+    }
+
+    /// Assign each node a level equal to its longest dependency chain depth.
+    ///
+    /// Nodes with no dependencies are level `0`; a node's level is
+    /// `1 + max(level of its dependencies)`. Two nodes at the same level have
+    /// no dependency relationship and can be applied in parallel.
+    pub fn levels(&self) -> HashMap<String, usize> {
+        let mut memo: HashMap<String, usize> = HashMap::new();
+        for n in &self.nodes {
+            Self::compute_level(n, &self.deps, &mut memo);
+        }
+        memo
+    }
+
+    /// Recursively compute (and memoize) the dependency level of `node`.
+    fn compute_level(
+        node: &str,
+        deps: &HashMap<String, Vec<String>>,
+        memo: &mut HashMap<String, usize>,
+    ) -> usize {
+        if let Some(&cached) = memo.get(node) {
+            return cached;
+        }
+        // Guard against cycles by marking in-progress with a temporary large
+        // value; the cycle is ultimately reported by `order`.
+        memo.insert(node.to_string(), usize::MAX);
+        let level = deps
+            .get(node)
+            .map(|d| {
+                d.iter()
+                    .map(|dep| Self::compute_level(dep, deps, memo))
+                    .max()
+                    .unwrap_or(0)
+                    + 1
+            })
+            .unwrap_or(0);
+        memo.insert(node.to_string(), level);
+        level
     }
 
     /// Return the node ids in dependency order (dependencies first).
@@ -278,10 +318,7 @@ mod tests {
             ir_version: bastion_ir::IR_VERSION,
             config: None,
             variables: vec![],
-            resources: vec![
-                resource("t.a", "a", &["b"]),
-                resource("t.b", "b", &["a"]),
-            ],
+            resources: vec![resource("t.a", "a", &["b"]), resource("t.b", "b", &["a"])],
             modules: vec![],
             outputs: vec![],
         };

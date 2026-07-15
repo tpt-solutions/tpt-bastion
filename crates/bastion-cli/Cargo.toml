@@ -10,6 +10,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
+documentation = "https://docs.rs/bastion-cli"
 keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
@@ -22,6 +23,9 @@ path = "src/main.rs"
 bastion-dsl = { path = "../bastion-dsl" }
 bastion-ir = { path = "../bastion-ir" }
 bastion-engine = { path = "../bastion-engine" }
+bastion-state = { path = "../bastion-state" }
+bastion-providers = { path = "../bastion-providers" }
+bastion-events = { path = "../bastion-events" }
 clap.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
