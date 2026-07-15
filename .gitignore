@@ -6,6 +6,9 @@ Cargo.lock
 # MkDocs build output
 /site
 
+# Python cache
+**/__pycache__/
+
 # IDE
 .idea/
 .vscode/
