@@ -24,7 +24,8 @@ pub struct ScaffoldOutput {
 /// (`../../bastion-providers`); published providers should switch this to a
 /// crates.io version. Returns the created paths on success.
 pub fn scaffold_provider(name: &str, out_dir: &Path) -> anyhow::Result<ScaffoldOutput> {
-    let crate_name = format!("bastion-provider-{name}");
+    let safe = sanitize_name(name)?;
+    let crate_name = format!("bastion-provider-{safe}");
     let dir = out_dir.join(&crate_name);
     if dir.exists() {
         anyhow::bail!("refusing to overwrite existing path {}", dir.display());
@@ -32,10 +33,10 @@ pub fn scaffold_provider(name: &str, out_dir: &Path) -> anyhow::Result<ScaffoldO
     std::fs::create_dir_all(&dir).map_err(|e| anyhow::anyhow!("mkdir: {e}"))?;
     std::fs::create_dir_all(dir.join("src")).map_err(|e| anyhow::anyhow!("mkdir src: {e}"))?;
 
-    let pascal = to_pascal_case(name);
+    let pascal = to_pascal_case(&safe);
 
-    let cargo = cargo_toml(name, &crate_name);
-    let lib = lib_rs(name, &pascal);
+    let cargo = cargo_toml(&safe, &crate_name);
+    let lib = lib_rs(&safe, &pascal);
     let main = main_rs(&pascal);
 
     let mut files = Vec::new();
@@ -164,6 +165,35 @@ fn main() {{
     )
 }
 
+/// Reject provider names that could escape the output directory or produce an
+/// invalid crate name. Returns a normalized, filesystem-safe identifier.
+fn sanitize_name(name: &str) -> anyhow::Result<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("provider name must not be empty");
+    }
+    if trimmed.starts_with('-') || trimmed.starts_with('_') {
+        anyhow::bail!("provider name must not start with a separator: `{name}`");
+    }
+    for part in trimmed.split(['/', '\\']) {
+        if part.is_empty() || part == "." || part == ".." {
+            anyhow::bail!("provider name must not contain path separators or `.`/`..`: `{name}`");
+        }
+    }
+    let mut out = String::new();
+    for ch in trimmed.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            out.push(ch);
+        } else {
+            anyhow::bail!("provider name contains an invalid character `{ch}`: `{name}`");
+        }
+    }
+    if out.is_empty() {
+        anyhow::bail!("provider name must contain at least one alphanumeric character");
+    }
+    Ok(out)
+}
+
 /// Convert a kebab/snake/flat name to PascalCase for the generated type.
 fn to_pascal_case(name: &str) -> String {
     let mut out = String::new();
@@ -193,5 +223,17 @@ mod tests {
         assert_eq!(to_pascal_case("aws-s3"), "AwsS3");
         assert_eq!(to_pascal_case("local_file"), "LocalFile");
         assert_eq!(to_pascal_case(""), "Generated");
+    }
+
+    #[test]
+    fn sanitize_rejects_traversal_and_junk() {
+        for bad in ["", "..", "../x", "a/../b", "-x", "_y", "a b", "a.b", "a!"] {
+            assert!(
+                sanitize_name(bad).is_err(),
+                "expected `{bad}` to be rejected"
+            );
+        }
+        assert_eq!(sanitize_name("aws-s3").unwrap(), "aws-s3");
+        assert_eq!(sanitize_name(" My_Prov ").unwrap(), "My_Prov");
     }
 }

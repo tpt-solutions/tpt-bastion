@@ -14,8 +14,14 @@
   },
   "files": [
     "src",
-    "README.md"
+    "README.md",
+    "LICENSE-APACHE",
+    "LICENSE-MIT"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "keywords": [
     "iac",
     "infrastructure",

@@ -19,7 +19,8 @@ use argon2::{
 use rand::rngs::OsRng;
 use rand::RngCore;
 use sha2::Sha256;
-use std::num::NonZeroU32;
+
+/// Length in bytes of the per-file salt feeding Argon2id.
 
 /// Length in bytes of the per-file salt feeding Argon2id.
 pub const SALT_LEN: usize = 16;
@@ -120,10 +121,6 @@ pub fn fingerprint(bytes: &[u8]) -> String {
     }
     s
 }
-
-/// Compile-time guard so a future change to the key-length assumptions is
-/// caught at build time rather than producing silently-wrong ciphertext.
-const _: () = assert!(NonZeroU32::new(32).is_some());
 
 /// Encode bytes as a lowercase hex string. Used for the salt/nonce/ciphertext
 /// fields of the encrypted envelope so the on-disk JSON stays human-inspectable.

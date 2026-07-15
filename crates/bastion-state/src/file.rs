@@ -149,6 +149,31 @@ impl FileStateBackend {
     }
 }
 
+/// Write `contents` to `path` with owner-only permissions on Unix (`0600`).
+///
+/// On Unix this prevents other local users from reading the (possibly
+/// plaintext) state or lock file. On Windows the mode is ignored and the OS
+/// default ACL applies.
+pub(crate) fn write_string_secure(path: &Path, contents: &str) -> Result<(), StateError> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true).mode(0o600);
+        let mut f = opts
+            .open(path)
+            .map_err(|e| StateError::Io(format!("{}: {e}", path.display())))?;
+        f.write_all(contents.as_bytes())
+            .map_err(|e| StateError::Io(format!("{}: {e}", path.display())))?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, contents).map_err(|e| StateError::Io(format!("{}: {e}", path.display())))?;
+    }
+    Ok(())
+}
+
 impl StateBackend for FileStateBackend {
     fn load_state(&self) -> Result<State, StateError> {
         match self.read_envelope_text()? {
@@ -166,13 +191,13 @@ impl StateBackend for FileStateBackend {
 
         // Write the state envelope.
         let envelope = self.build_envelope(state)?;
-        std::fs::write(&self.path, envelope).map_err(|e| StateError::Io(e.to_string()))?;
+        write_string_secure(&self.path, &envelope)?;
 
         // Append a history entry.
         let mut history = self.read_history()?;
         history.record(state, prev.as_ref())?;
         let hp = self.history_path();
-        std::fs::write(&hp, history.to_json()?).map_err(|e| StateError::Io(e.to_string()))?;
+        write_string_secure(&hp, &history.to_json()?)?;
 
         Ok(())
     }

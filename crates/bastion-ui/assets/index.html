@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TPT Bastion — Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d; --fg: #e6edf3;
+    --muted: #8b949e; --accent: #2f81f7; --green: #3fb950; --red: #f85149;
+    --yellow: #d29922; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--border);
+           display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .file { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  .token { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  .token input { background: var(--panel); border: 1px solid var(--border);
+                 color: var(--fg); padding: 5px 8px; border-radius: 6px; font-size: 12px; }
+  nav { display: flex; gap: 2px; padding: 0 14px; border-bottom: 1px solid var(--border); }
+  nav button { background: none; border: none; color: var(--muted); cursor: pointer;
+               padding: 10px 14px; font-size: 13px; border-bottom: 2px solid transparent; }
+  nav button.active { color: var(--fg); border-bottom-color: var(--accent); }
+  main { padding: 18px 20px; }
+  .tab { display: none; }
+  .tab.active { display: block; }
+  pre { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+        padding: 14px; overflow: auto; font-family: var(--mono); font-size: 12.5px;
+        line-height: 1.5; max-height: 70vh; }
+  .summary { display: flex; gap: 18px; margin-bottom: 12px; flex-wrap: wrap; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+          padding: 10px 16px; min-width: 90px; }
+  .stat .n { font-size: 22px; font-weight: 700; }
+  .stat .l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .create { color: var(--green); } .update { color: var(--yellow); }
+  .delete { color: var(--red); } .clean { color: var(--green); } .dirty { color: var(--red); }
+  .actions { margin-top: 14px; display: flex; gap: 10px; align-items: center; }
+  button.apply { background: var(--accent); color: #fff; border: none; padding: 9px 16px;
+                 border-radius: 6px; font-size: 13px; cursor: pointer; }
+  button.apply:disabled { opacity: .4; cursor: not-allowed; }
+  .msg { font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: pre-wrap; }
+  .err { color: var(--red); }
+  .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>TPT Bastion</h1>
+  <span class="file" id="fileLabel">—</span>
+  <span class="pill" id="mode">read-only</span>
+  <div class="token">
+    <label for="tok" style="font-size:12px;color:var(--muted)">token</label>
+    <input id="tok" type="password" placeholder="optional" size="18" />
+  </div>
+</header>
+<nav>
+  <button data-tab="compile" class="active">Compile</button>
+  <button data-tab="plan">Plan</button>
+  <button data-tab="state">State</button>
+  <button data-tab="history">History</button>
+  <button data-tab="drift">Drift</button>
+</nav>
+<main>
+  <section class="tab active" id="tab-compile">
+    <div class="summary"><div class="stat"><div class="n" id="c-res">0</div><div class="l">resources</div></div>
+      <div class="stat"><div class="n" id="c-var">0</div><div class="l">variables</div></div>
+      <div class="stat"><div class="n" id="c-out">0</div><div class="l">outputs</div></div></div>
+    <pre id="compile-out">loading…</pre>
+  </section>
+  <section class="tab" id="tab-plan">
+    <div class="summary">
+      <div class="stat"><div class="n create" id="p-create">0</div><div class="l">to create</div></div>
+      <div class="stat"><div class="n update" id="p-update">0</div><div class="l">to update</div></div>
+      <div class="stat"><div class="n delete" id="p-delete">0</div><div class="l">to delete</div></div>
+    </div>
+    <pre id="plan-out">loading…</pre>
+    <div class="actions"><button class="apply" id="applyBtn" disabled>Apply (auto-approve)</button>
+      <span class="msg" id="apply-msg"></span></div>
+  </section>
+  <section class="tab" id="tab-state">
+    <pre id="state-out">loading…</pre>
+  </section>
+  <section class="tab" id="tab-history">
+    <pre id="history-out">loading…</pre>
+  </section>
+  <section class="tab" id="tab-drift">
+    <div class="summary"><div class="stat"><div class="n" id="d-count">0</div><div class="l">drift items</div></div>
+      <div class="stat"><div class="n" id="d-state">—</div><div class="l">status</div></div></div>
+    <pre id="drift-out">loading…</pre>
+  </section>
+</main>
+
+<script>
+const api = {
+  headers() {
+    const t = document.getElementById('tok').value.trim();
+    const h = { 'Accept': 'application/json' };
+    if (t) h['Authorization'] = 'Bearer ' + t;
+    return h;
+  },
+  async get(path) {
+    const r = await fetch(path, { headers: api.headers() });
+    if (r.status === 401) throw new Error('unauthorized — set the token above');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  },
+  async post(path) {
+    const r = await fetch(path, { method: 'POST', headers: api.headers() });
+    const text = await r.text();
+    if (r.status === 401) throw new Error('unauthorized — set the token above');
+    return { ok: r.ok, text };
+  }
+};
+
+function show(tab) {
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.tab').forEach(s => s.classList.toggle('active', s.id === 'tab-' + tab));
+}
+
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => { show(b.dataset.tab); refresh(b.dataset.tab); });
+
+function pretty(o) { return JSON.stringify(o, null, 2); }
+
+async function refresh(tab) {
+  try {
+    if (tab === 'compile') {
+      const d = await api.get('/api/compile');
+      document.getElementById('c-res').textContent = d.resources.length;
+      document.getElementById('c-var').textContent = d.variables.length;
+      document.getElementById('c-out').textContent = d.outputs.length;
+      document.getElementById('compile-out').textContent = pretty(d);
+    } else if (tab === 'plan') {
+      const p = await api.get('/api/plan');
+      document.getElementById('p-create').textContent = p.to_create;
+      document.getElementById('p-update').textContent = p.to_update;
+      document.getElementById('p-delete').textContent = p.to_delete;
+      document.getElementById('plan-out').textContent = pretty(p.actions);
+    } else if (tab === 'state') {
+      const s = await api.get('/api/state');
+      document.getElementById('state-out').textContent = pretty(s);
+    } else if (tab === 'history') {
+      const h = await api.get('/api/history');
+      document.getElementById('history-out').textContent = pretty(h);
+    } else if (tab === 'drift') {
+      const dr = await api.get('/api/drift');
+      document.getElementById('d-count').textContent = dr.items.length;
+      const st = document.getElementById('d-state');
+      st.textContent = dr.items.length ? 'drifted' : 'clean';
+      st.className = 'n ' + (dr.items.length ? 'dirty' : 'clean');
+      document.getElementById('drift-out').textContent = pretty(dr.items);
+    }
+  } catch (e) {
+    const el = document.querySelector('.tab.active pre');
+    if (el) { el.textContent = e.message; el.classList.add('err'); }
+  }
+}
+
+document.getElementById('applyBtn').onclick = async () => {
+  const msg = document.getElementById('apply-msg');
+  msg.textContent = 'applying…';
+  try {
+    const r = await api.post('/api/apply');
+    msg.textContent = r.ok ? 'done:\n' + r.text : 'failed:\n' + r.text;
+    refresh('plan'); refresh('state');
+  } catch (e) { msg.textContent = e.message; }
+};
+
+(async () => {
+  document.getElementById('fileLabel').textContent = location.search.replace('?', '') || 'no file';
+  // Probe whether apply is enabled.
+  try {
+    const info = await api.get('/api/info');
+    document.getElementById('mode').textContent = info.allow_apply ? 'apply enabled' : 'read-only';
+    document.getElementById('applyBtn').disabled = !info.allow_apply;
+  } catch (e) { /* token may be required */ }
+  refresh('compile');
+})();
+</script>
+</body>
+</html>

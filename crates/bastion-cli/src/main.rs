@@ -132,6 +132,33 @@ enum Command {
         #[command(subcommand)]
         action: EventsAction,
     },
+
+    /// Serve a local web dashboard for this document (compile/plan/state/drift).
+    Ui {
+        /// Path to the `.bcl` document to visualize. Use `-` to read from stdin.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// State file for plan diffs, state inspection, and drift.
+        #[arg(long, value_name = "PATH")]
+        state: Option<PathBuf>,
+
+        /// TCP port to bind on 127.0.0.1.
+        #[arg(long, default_value_t = 7474)]
+        port: u16,
+
+        /// Bearer token required on every `/api/*` request (loopback only).
+        #[arg(long, value_name = "VAR")]
+        token_env: Option<String>,
+
+        /// Environment variable holding the state encryption passphrase.
+        #[arg(long, value_name = "VAR")]
+        passphrase_env: Option<String>,
+
+        /// Expose the mutating `apply` action in the dashboard.
+        #[arg(long)]
+        allow_apply: bool,
+    },
 }
 
 /// What to do via the `events` subcommand.
@@ -164,6 +191,11 @@ enum EventsAction {
         /// Run `apply --auto-approve` instead of `plan` on each event.
         #[arg(long)]
         apply: bool,
+
+        /// Environment variable holding the shared secret required on every
+        /// inbound request. Required when `--apply` is set (fail-closed).
+        #[arg(long, value_name = "VAR")]
+        secret_env: Option<String>,
     },
 }
 
@@ -234,6 +266,21 @@ fn main() -> Result<()> {
         } => cmd_drift(&file, &state, passphrase_env.as_deref(), reconcile),
         Command::Provider { action } => cmd_provider(&action),
         Command::Events { action } => cmd_events(&action),
+        Command::Ui {
+            file,
+            state,
+            port,
+            token_env,
+            passphrase_env,
+            allow_apply,
+        } => cmd_ui(
+            &file,
+            state.as_ref(),
+            port,
+            token_env.as_deref(),
+            passphrase_env.as_deref(),
+            allow_apply,
+        ),
     }
 }
 
@@ -276,11 +323,38 @@ fn cmd_events(action: &EventsAction) -> Result<()> {
                 }
             });
         }
-        EventsAction::Webhook { file, port, apply } => {
+        EventsAction::Webhook {
+            file,
+            port,
+            apply,
+            secret_env,
+        } => {
+            // Fail closed: a webhook that can trigger applies must be authenticated.
+            let secret = if *apply {
+                let var = secret_env.as_deref().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "refusing to start an apply-on-webhook listener without --secret-env; \
+                         set it to an env var holding the shared token"
+                    )
+                })?;
+                Some(
+                    std::env::var(var)
+                        .with_context(|| format!("webhook secret env var `{var}` is not set"))?,
+                )
+            } else {
+                secret_env
+                    .as_deref()
+                    .and_then(|v| std::env::var(v).ok())
+            };
             let addr = format!("127.0.0.1:{port}");
-            let source =
-                WebhookEventSource::bind(&addr).map_err(|e| anyhow::anyhow!("bind: {e}"))?;
-            println!("Listening for webhooks on {addr}; Ctrl-C to stop.");
+            let authenticated = secret.is_some();
+            let source = WebhookEventSource::bind_with_secret(&addr, secret)
+                .map_err(|e| anyhow::anyhow!("bind: {e}"))?;
+            println!(
+                "Listening for webhooks on {addr} ({}{}); Ctrl-C to stop.",
+                if authenticated { "authenticated" } else { "open" },
+                if *apply { ", apply mode" } else { "" }
+            );
             let mut source = source;
             run_forever(&mut source, |ev| {
                 println!("[event] {ev}");
@@ -290,6 +364,36 @@ fn cmd_events(action: &EventsAction) -> Result<()> {
             });
         }
     }
+}
+
+fn cmd_ui(
+    file: &PathBuf,
+    state: Option<&PathBuf>,
+    port: u16,
+    token_env: Option<&str>,
+    passphrase_env: Option<&str>,
+    allow_apply: bool,
+) -> Result<()> {
+    // Resolve the document path; `-` (stdin) is not supported by the long-lived
+    // server, which needs a stable file to poll.
+    if file.as_os_str() == "-" {
+        anyhow::bail!("`bastion ui` requires a file path, not stdin (`-`)");
+    }
+    let token = match token_env {
+        Some(var) => Some(
+            std::env::var(var).with_context(|| format!("ui token env var `{var}` is not set"))?,
+        ),
+        None => None,
+    };
+    let config = bastion_ui::UiConfig {
+        file: file.clone(),
+        state: state.cloned(),
+        port,
+        token,
+        passphrase_env: passphrase_env.map(|s| s.to_string()),
+        allow_apply,
+    };
+    bastion_ui::serve(config)
 }
 
 fn read_source(file: &PathBuf) -> Result<String> {

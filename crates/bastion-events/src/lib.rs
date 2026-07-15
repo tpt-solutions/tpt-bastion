@@ -117,10 +117,23 @@ impl EventSource for FileEventSource {
     }
 }
 
+/// Maximum request body (1 MiB) we will buffer. Bounds memory even when a
+/// client sends a pathological `Content-Length`.
+const MAX_BODY: usize = 1 << 20;
+
+/// Per-read socket timeout for webhook connections. Prevents a slow or stalled
+/// client from pinning a worker thread indefinitely (slowloris-style DoS).
+const WEBHOOK_READ_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Accepts inbound HTTP `POST` requests and emits [`InfraEvent::Webhook`].
 ///
 /// A minimal, dependency-free HTTP listener suitable for control-plane
-/// webhooks; pair it with a reverse proxy for TLS/auth in production.
+/// webhooks. When constructed with [`WebhookEventSource::bind_with_secret`],
+/// every request must present a shared secret (via the `X-Bastion-Token`
+/// header or `Authorization: Bearer <secret>`); unauthenticated requests are
+/// rejected with `401` and produce no event. For production exposure, still
+/// place this behind a reverse proxy for TLS — loopback binding is *not* a
+/// substitute for authentication.
 pub struct WebhookEventSource {
     rx: Receiver<InfraEvent>,
     local_addr: std::net::SocketAddr,
@@ -128,15 +141,23 @@ pub struct WebhookEventSource {
 }
 
 impl WebhookEventSource {
-    /// Bind the webhook listener to `addr` (e.g. `127.0.0.1:8080`) and start
-    /// accepting connections on a background thread.
+    /// Bind an unauthenticated webhook listener to `addr` (e.g. `127.0.0.1:8080`).
+    ///
+    /// Prefer [`WebhookEventSource::bind_with_secret`] when the listener can
+    /// trigger mutating reconcilers (e.g. `apply --auto-approve`).
     pub fn bind(addr: &str) -> std::io::Result<Self> {
+        Self::bind_with_secret(addr, None)
+    }
+
+    /// Bind a webhook listener to `addr`, optionally requiring `secret` on every
+    /// request. See the type docs for the authentication contract.
+    pub fn bind_with_secret(addr: &str, secret: Option<String>) -> std::io::Result<Self> {
         let listener = TcpListener::bind(addr)?;
         let local_addr = listener.local_addr()?;
         let (tx, rx) = channel::<InfraEvent>();
         let handle = thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                if let Some(event) = read_webhook(stream) {
+                if let Some(event) = read_webhook(stream, &secret) {
                     if tx.send(event).is_err() {
                         break;
                     }
@@ -163,7 +184,14 @@ impl EventSource for WebhookEventSource {
 }
 
 /// Read a single HTTP request from `stream` and turn a `POST` into an event.
-fn read_webhook(mut stream: TcpStream) -> Option<InfraEvent> {
+///
+/// When `secret` is `Some`, the request must carry it via `X-Bastion-Token` or
+/// `Authorization: Bearer <secret>`; mismatches are answered with `401` and
+/// yield no event. `Content-Length` is capped at [`MAX_BODY`] and every read is
+/// bounded by [`WEBHOOK_READ_TIMEOUT`].
+fn read_webhook(mut stream: TcpStream, secret: &Option<String>) -> Option<InfraEvent> {
+    let _ = stream.set_read_timeout(Some(WEBHOOK_READ_TIMEOUT));
+
     let mut buf = Vec::new();
     let mut byte = [0u8; 1];
     // Read headers up to the blank line separating them from the body.
@@ -184,10 +212,36 @@ fn read_webhook(mut stream: TcpStream) -> Option<InfraEvent> {
     let path = parts.next().unwrap_or("/").to_string();
 
     let mut content_length = 0usize;
+    let mut presented_token: Option<String> = None;
     for line in lines {
-        if let Some(rest) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+        let lower = line.to_ascii_lowercase();
+        if let Some(rest) = lower.strip_prefix("content-length:") {
             content_length = rest.trim().parse().unwrap_or(0);
+        } else if let Some(rest) = lower.strip_prefix("x-bastion-token:") {
+            presented_token = Some(rest.trim().to_string());
+        } else if let Some(rest) = lower.strip_prefix("authorization: bearer ") {
+            presented_token = Some(rest.trim().to_string());
         }
+    }
+
+    // Authenticate before consuming any body.
+    if let Some(expected) = secret {
+        match presented_token {
+            Some(presented) if constant_time_eq(presented.as_bytes(), expected.as_bytes()) => {}
+            _ => {
+                let _ = stream.write_all(
+                    b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n",
+                );
+                let _ = stream.shutdown(Shutdown::Both);
+                return None;
+            }
+        }
+    }
+
+    if content_length > MAX_BODY {
+        let _ = stream.write_all(b"HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\n\r\n");
+        let _ = stream.shutdown(Shutdown::Both);
+        return None;
     }
 
     let header_len = buf.len();
@@ -215,6 +269,18 @@ fn read_webhook(mut stream: TcpStream) -> Option<InfraEvent> {
         let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
         None
     }
+}
+
+/// Constant-time string comparison to avoid leaking the secret via timing.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 /// Run the reconcile-on-event loop forever, calling `handler` for every event.
@@ -276,6 +342,79 @@ mod tests {
         handle.join().unwrap();
         assert_eq!(event, Some(InfraEvent::FileChanged(path.clone())));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn webhook_accepts_with_secret() {
+        let source = WebhookEventSource::bind_with_secret("127.0.0.1:0", Some("s3cr3t".into())).unwrap();
+        let addr = source.local_addr();
+
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(addr).unwrap();
+            let payload = "hello";
+            let req = format!(
+                "POST /hook HTTP/1.1\r\nContent-Length: {}\r\nX-Bastion-Token: s3cr3t\r\n\r\n{}",
+                payload.len(),
+                payload
+            );
+            stream.write_all(req.as_bytes()).unwrap();
+        });
+
+        let mut source = source;
+        let event = source.next_event();
+        client.join().unwrap();
+        match event {
+            Some(InfraEvent::Webhook { method, path, body }) => {
+                assert_eq!(method, "POST");
+                assert_eq!(path, "/hook");
+                assert_eq!(body, "hello");
+            }
+            other => panic!("expected webhook event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn webhook_rejects_without_secret() {
+        let source = WebhookEventSource::bind_with_secret("127.0.0.1:0", Some("s3cr3t".into())).unwrap();
+        let addr = source.local_addr();
+
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(addr).unwrap();
+            let payload = "hello";
+            let req = format!(
+                "POST /hook HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
+                payload.len(),
+                payload
+            );
+            stream.write_all(req.as_bytes()).unwrap();
+            // The server should close the connection after a 401; expect EOF.
+            let mut buf = [0u8; 1];
+            let _ = stream.read(&mut buf);
+        });
+
+        let mut source = source;
+        let event = source.next_event();
+        client.join().unwrap();
+        assert_eq!(event, None, "unauthenticated webhook must not produce an event");
+    }
+
+    #[test]
+    fn webhook_rejects_oversized_body() {
+        let source = WebhookEventSource::bind("127.0.0.1:0").unwrap();
+        let addr = source.local_addr();
+
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(addr).unwrap();
+            let req = "POST /hook HTTP/1.1\r\nContent-Length: 999999999\r\n\r\n";
+            stream.write_all(req.as_bytes()).unwrap();
+            let mut buf = [0u8; 1];
+            let _ = stream.read(&mut buf);
+        });
+
+        let mut source = source;
+        let event = source.next_event();
+        client.join().unwrap();
+        assert_eq!(event, None, "oversized body must be rejected");
     }
 
     #[test]

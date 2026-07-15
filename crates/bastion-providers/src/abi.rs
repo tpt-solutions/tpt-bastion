@@ -156,10 +156,18 @@ impl SubprocessRuntime {
 
 impl ProviderRuntime for SubprocessRuntime {
     fn load(&self, name: &str) -> Result<Arc<dyn ProviderPlugin>, RuntimeError> {
-        let mut child = Command::new(&self.binary)
-            .stdin(Stdio::piped())
+        let mut cmd = Command::new(&self.binary);
+        cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::null());
+        // Confine the child before it execs the provider binary: resource
+        // limits + read-only landlock. Best-effort on non-Unix platforms.
+        #[cfg(unix)]
+        {
+            cmd.pre_exec(|| crate::sandbox::confine_current_process(crate::sandbox::Limits::default()));
+        }
+
+        let mut child = cmd
             .spawn()
             .map_err(|e| RuntimeError::Process {
                 name: name.to_string(),

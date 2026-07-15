@@ -26,6 +26,7 @@ bastion-engine = { path = "../bastion-engine" }
 bastion-state = { path = "../bastion-state" }
 bastion-providers = { path = "../bastion-providers" }
 bastion-events = { path = "../bastion-events" }
+bastion-ui = { path = "../bastion-ui" }
 clap.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true

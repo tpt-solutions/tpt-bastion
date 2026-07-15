@@ -23,6 +23,20 @@ dependencies = []
 [project.urls]
 Homepage = "https://bastion.tpt.dev"
 Repository = "https://github.com/tpt/bastion"
+Documentation = "https://bastion.tpt.dev"
+Issues = "https://github.com/tpt/bastion/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["bastion"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "bastion",
+    "examples",
+    "README.md",
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
+]
+
+[tool.hatch.build]
+artifacts = ["bastion/__pycache__"]

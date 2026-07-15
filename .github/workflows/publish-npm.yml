@@ -1,0 +1,60 @@
+name: Publish npm
+
+# Publishes the TypeScript bindings to npm on a `bindings-typescript-v*.*.*` tag.
+# Uses npm provenance (OIDC, no token in the repo) and publishes publicly.
+
+on:
+  push:
+    tags:
+      - "bindings-typescript-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (without the leading v), e.g. 0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bindings/typescript
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.6.0"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Sync version from tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          VERSION="${GITHUB_REF_NAME#bindings-typescript-v}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+        shell: bash
+
+      - name: Sync version from input
+        if: github.event_name == 'workflow_dispatch'
+        run: npm version "${{ github.event.inputs.version }}" --no-git-tag-version --allow-same-version
+        shell: bash
+
+      - name: Include license files in the package
+        run: cp ../../LICENSE-APACHE ../../LICENSE-MIT .
+        shell: bash
+
+      - name: Dry-run pack (sanity)
+        run: npm pack --dry-run
+        shell: bash
+
+      - name: Publish (provenance)
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

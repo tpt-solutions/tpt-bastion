@@ -9,6 +9,7 @@
 //! sufficient for a CLI tool where a single process owns an apply at a time.
 
 use crate::error::StateError;
+use crate::file::write_string_secure;
 use crate::state::now_rfc3339;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -73,7 +74,7 @@ pub fn acquire_lock_file(
         serde_json::to_string_pretty(&info).map_err(|e| StateError::Encode(e.to_string()))?;
     // Best-effort exclusive create; if it already exists and is a stale lock we
     // overwrite below.
-    std::fs::write(lock_path, text).map_err(|e| StateError::Io(e.to_string()))?;
+    write_string_secure(lock_path, &text)?;
     Ok(LockGuard {
         backend_key: lock_path.to_string_lossy().into_owned(),
         holder: holder.to_string(),

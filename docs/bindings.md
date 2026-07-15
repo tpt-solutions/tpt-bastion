@@ -86,6 +86,15 @@ All three describe the same infrastructure and compile through the same engine.
 
 ## Publishing
 
-The packages are publish-ready (`bindings/typescript/package.json`,
-`bindings/python/pyproject.toml`). Actual `npm publish` / `twine upload` runs at
-release time via the publish pipeline; see the roadmap Phase 9.
+Both packages are publish-ready and ship through dedicated, tag-triggered
+workflows (no secrets stored in the repo):
+
+- **npm** — push a `bindings-typescript-v*.*.*` tag to run
+  `.github/workflows/publish-npm.yml`, which publishes with npm provenance
+  (`npm publish --provenance --access public`).
+- **PyPI** — push a `bindings-python-v*.*.*` tag to run
+  `.github/workflows/publish-pypi.yml`, which builds the sdist/wheel and uploads
+  via PyPI Trusted Publishing (OIDC). Configure a trusted publisher in the PyPI
+  `bastion` project pointing at this workflow + `release` environment.
+
+The version is taken from the tag, so a release is just `git tag bindings-typescript-v0.1.0 && git push --tags`.
