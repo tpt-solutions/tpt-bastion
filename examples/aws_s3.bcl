@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
+config {
+    name = "bastion-demo"
+    region = "us-east-1"
+}
+
+variable region {
+    type = "string"
+    default = "us-east-1"
+}
+
+resource aws_s3_bucket my_bucket {
+    bucket = "bastion-demo-bucket"
+    acl = "private"
+    tags {
+        environment = "dev"
+        team = "platform"
+    }
+    versioning = true
+    count = 3
+}
+
+resource aws_s3_bucket replica {
+    bucket = "bastion-demo-bucket-replica"
+    acl = "private"
+    tags {
+        environment = "dev"
+    }
+}
+
+output bucket_name {
+    value = my_bucket.bucket
+}
+
+output bucket_arn {
+    value = my_bucket.arn
+}

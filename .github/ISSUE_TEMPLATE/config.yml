@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: TPT Bastion Documentation
+    url: https://bastion.tpt.dev
+    about: Read the docs and language reference before filing an issue.
+  - name: Security Vulnerability Report
+    url: https://github.com/tpt/bastion/security/advisories/new
+    about: Please report security issues privately via a security advisory, not a public issue.

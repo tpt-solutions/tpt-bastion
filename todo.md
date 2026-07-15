@@ -3,20 +3,20 @@
 Next-generation Infrastructure-as-Code platform in Rust. Tracks all phases from zero to public release.
 
 ## Phase 0 — Project Foundations
-- [ ] Set up Rust workspace and crate layout (designed for independent crates.io publishing)
-- [ ] Set up CI pipeline (build, test, lint/clippy, fmt check)
-- [ ] Add dual license: LICENSE-APACHE + LICENSE-MIT, SPDX headers across crates
-- [ ] Define versioning/release strategy (semver)
-- [ ] Write initial README and project overview
+- [x] Set up Rust workspace and crate layout (designed for independent crates.io publishing)
+- [x] Set up CI pipeline (build, test, lint/clippy, fmt check)
+- [x] Add dual license: LICENSE-APACHE + LICENSE-MIT, SPDX headers across crates
+- [x] Define versioning/release strategy (semver)
+- [x] Write initial README and project overview
 - [ ] Set up issue/task tracking conventions
 
 ## Phase 1 — DSL & IR Design
-- [ ] Design DSL syntax (type-safe, declarative infrastructure config)
-- [ ] Design type system (resource types, references, modules)
-- [ ] Design intermediate representation (IR) spec and versioning
-- [ ] Build parser (lexer, AST)
-- [ ] Build compiler: AST → IR
-- [ ] Implement compile-time error diagnostics
+- [x] Design DSL syntax (type-safe, declarative infrastructure config)
+- [x] Design type system (resource types, references, modules)
+- [x] Design intermediate representation (IR) spec and versioning
+- [x] Build parser (lexer, AST)
+- [x] Build compiler: AST → IR
+- [x] Implement compile-time error diagnostics
 - [ ] Write DSL language reference/spec doc
 
 ## Phase 2 — Language Bindings (TypeScript/Python)
