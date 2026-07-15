@@ -21,7 +21,6 @@ use bastion_providers::plugin::{ProviderPlugin, ResourceRequest};
 use bastion_providers::schema::{
     AttributeSpec, LifecycleOps, ProviderSchema, ResourceTypeSpec, ValueType,
 };
-use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
@@ -212,6 +211,7 @@ fn render_hcl_value(v: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     fn req() -> ResourceRequest {
         let mut attributes = BTreeMap::new();

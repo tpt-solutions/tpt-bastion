@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+# MkDocs Material configuration for the TPT Bastion documentation site.
+# Build locally with `mkdocs serve` (after `pip install mkdocs-material`),
+# or let .github/workflows/docs.yml build and publish it to GitHub Pages.
+
+site_name: TPT Bastion
+site_description: >-
+  Next-generation Infrastructure-as-Code platform in Rust. Type-safe DSL,
+  native encrypted state, drift detection, Wasm provider sandboxing, and
+  event-driven reconciliation.
+site_url: https://bastion.tpt.dev
+site_author: TPT
+copyright: >-
+  Copyright &copy; TPT. Licensed under Apache-2.0 OR MIT.
+
+repo_name: tpt/bastion
+repo_url: https://github.com/tpt/bastion
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - tables
+  - fenced_code
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Language Reference: language-reference.md
+  - Provider Guide: provider-guide.md
+  - Bindings: bindings.md
+  - Events: events.md
+  - Migrating from Terraform: migrate-from-terraform.md

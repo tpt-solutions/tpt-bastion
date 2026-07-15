@@ -62,3 +62,17 @@ jobs:
         run: cargo fmt --all -- --check
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+  docs:
+    name: Docs site build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install MkDocs Material
+        run: pip install mkdocs-material
+      - name: Build site
+        run: mkdocs build --strict

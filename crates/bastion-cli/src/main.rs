@@ -17,8 +17,8 @@ use bastion_dsl::compile_source;
 use bastion_engine::{
     plan_document_with_state, Executor, MockProvider, PrintingHandler, State as EngineState,
 };
+use bastion_events::{run_forever, FileEventSource, WebhookEventSource};
 use bastion_providers::{NativeRuntime, NullProvider, PluginRegistry};
-use bastion_events::{FileEventSource, WebhookEventSource, run_forever};
 use bastion_state::{
     backend::StateBackend, drift::detect_drift, file::FileStateBackend,
     reconcile::detect_and_reconcile, reconcile::render_reconcile, State as BastionState,
@@ -260,11 +260,7 @@ fn run_bastion_on_event(file: &PathBuf, apply: bool) -> Result<()> {
 
 fn cmd_events(action: &EventsAction) -> Result<()> {
     match action {
-        EventsAction::Watch {
-            file,
-            watch,
-            apply,
-        } => {
+        EventsAction::Watch { file, watch, apply } => {
             let paths = if watch.is_empty() {
                 vec![file.clone()]
             } else {

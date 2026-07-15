@@ -20,11 +20,11 @@ Next-generation Infrastructure-as-Code platform in Rust. Tracks all phases from 
 - [x] Write DSL language reference/spec doc
 
 ## Phase 2 — Language Bindings (TypeScript/Python)
-- [ ] Decide binding architecture (FFI, Wasm, or codegen from IR)
-- [ ] Implement TypeScript bindings
-- [ ] Implement Python bindings
+- [x] Decide binding architecture (FFI, Wasm, or codegen from IR)
+- [x] Implement TypeScript bindings
+- [x] Implement Python bindings
 - [ ] Publish binding packages (npm, PyPI)
-- [ ] Write example configs in DSL, TypeScript, and Python
+- [x] Write example configs in DSL, TypeScript, and Python
 
 ## Phase 3 — Core Execution Engine
 - [x] Build dependency graph construction from IR
@@ -51,17 +51,17 @@ Next-generation Infrastructure-as-Code platform in Rust. Tracks all phases from 
 - [x] Write provider development guide
 
 ## Phase 6 — Cloud & Platform Providers (parallel tracks)
-- [ ] AWS provider (core resource coverage)
-- [ ] GCP provider (core resource coverage)
-- [ ] Azure provider (core resource coverage)
-- [ ] Kubernetes provider (core resource coverage)
-- [ ] Terraform-compatible provider shim (interop with existing TF providers)
+- [x] AWS provider (core resource coverage)
+- [x] GCP provider (core resource coverage)
+- [x] Azure provider (core resource coverage)
+- [x] Kubernetes provider (core resource coverage)
+- [x] Terraform-compatible provider shim (interop with existing TF providers)
 
 ## Phase 7 — Event-Driven Updates
-- [ ] Design internal event source/trigger interface
-- [ ] Implement triggers for infrastructure updates on external events
-- [ ] Implement reconciliation-on-event loop
-- [ ] Design pluggable interface for future external event backends (e.g. TPT Flux)
+- [x] Design internal event source/trigger interface
+- [x] Implement triggers for infrastructure updates on external events
+- [x] Implement reconciliation-on-event loop
+- [x] Design pluggable interface for future external event backends (e.g. TPT Flux)
 
 ## Phase 8 — Testing & Quality
 - [x] Define unit/integration testing strategy across crates
@@ -71,17 +71,17 @@ Next-generation Infrastructure-as-Code platform in Rust. Tracks all phases from 
 - [x] Set up test coverage reporting in CI
 
 ## Phase 9 — Packaging & Distribution
-- [ ] Prepare crates.io metadata for each publishable crate (description, keywords, categories, docs.rs config)
-- [ ] Set up `cargo publish` release automation
-- [ ] Build cross-platform CLI binaries
-- [ ] Publish install script and package manager entries (Homebrew, cargo install, etc.)
-- [ ] Build and publish Docker image
-- [ ] Automate versioned GitHub releases with changelogs
+- [x] Prepare crates.io metadata for each publishable crate (description, keywords, categories, docs.rs config)
+- [x] Set up `cargo publish` release automation
+- [x] Build cross-platform CLI binaries
+- [x] Publish install script and package manager entries (Homebrew, cargo install, etc.)
+- [x] Build and publish Docker image
+- [x] Automate versioned GitHub releases with changelogs
 
 ## Phase 10 — Open Source Launch
-- [ ] Finalize dual Apache-2.0/MIT licensing and notices across all crates
-- [ ] Build public documentation site
-- [ ] Write getting-started guide
-- [ ] Write migration guide from Terraform/OpenTofu
+- [x] Finalize dual Apache-2.0/MIT licensing and notices across all crates
+- [x] Build public documentation site
+- [x] Write getting-started guide
+- [x] Write migration guide from Terraform/OpenTofu
 - [ ] Publish public repository
 - [ ] Public launch announcement

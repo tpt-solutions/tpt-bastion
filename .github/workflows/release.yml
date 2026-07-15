@@ -173,7 +173,10 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          for crate in bastion-ir bastion-dsl bastion-engine bastion-state bastion-providers bastion-cli; do
+          for crate in \
+            bastion-ir bastion-dsl bastion-engine bastion-state bastion-providers bastion-cli \
+            bastion-provider-aws bastion-provider-gcp bastion-provider-azure \
+            bastion-provider-kubernetes bastion-provider-terraform-shim; do
             echo "publishing $crate"
             cargo publish -p "$crate" --no-verify || true
             sleep 20

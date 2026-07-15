@@ -3,6 +3,9 @@
 *.pdb
 Cargo.lock
 
+# MkDocs build output
+/site
+
 # IDE
 .idea/
 .vscode/
