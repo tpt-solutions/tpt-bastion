@@ -62,7 +62,7 @@ Differences to watch for:
 
 ## Reusing Terraform providers
 
-The Terraform-compatible shim (`providers/terraform-shim`) adapts the Terraform
+The Terraform-compatible shim (`providers/tpt-bastion-provider-terraform-shim`) adapts the Terraform
 plugin gRPC protocol so Bastion can drive existing community providers. Point
 Bastion at a provider binary and it is exposed through the same
 `ProviderPlugin` interface as native providers:
@@ -86,7 +86,7 @@ Bastion state is a self-describing, encrypted file. To migrate:
 
 > Note: automated Terraform→Bastion state import is tracked for a later release.
 > The native state format and `from`/`into` conversions between
-> `bastion_state::State` and `bastion_engine::State` already make the in-memory
+> `tpt_bastion_state::State` and `tpt_bastion_engine::State` already make the in-memory
 > mapping straightforward.
 
 ## Rollout strategy

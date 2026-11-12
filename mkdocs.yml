@@ -16,7 +16,7 @@ copyright: >-
 
 repo_name: tpt/bastion
 repo_url: https://github.com/tpt/bastion
-edit_uri: edit/main/docs/
+edit_uri: edit/master/docs/
 
 theme:
   name: material

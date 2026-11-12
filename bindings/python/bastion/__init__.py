@@ -81,7 +81,7 @@ def mp(**items: dict) -> dict:
 
 @dataclass
 class BastionDocument:
-    """A full Bastion document, mirroring ``bastion_ir::Document``."""
+    """A full Bastion document, mirroring ``tpt_bastion_ir::Document``."""
 
     config: Optional[dict] = None
     variables: list[dict] = field(default_factory=list)

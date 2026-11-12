@@ -8,10 +8,10 @@ building from source, or that you've installed the prebuilt binary (see the
 
 ```sh
 # Prebuilt binary (Linux/macOS)
-curl -fsSL https://raw.githubusercontent.com/tpt/bastion/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tpt/bastion/master/scripts/install.sh | sh
 
 # From source
-cargo install --path crates/bastion-cli
+cargo install --path crates/tpt-bastion-cli
 
 # Verify
 bastion --help

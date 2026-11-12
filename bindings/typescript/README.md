@@ -36,7 +36,7 @@ node --experimental-strip-types examples/aws_s3.ts
 ```
 
 To drive real infrastructure, build the CLI (`cargo install --path
-crates/bastion-cli`) and call `plan(doc)` / `apply(doc)` from the bindings — they
+crates/tpt-bastion-cli`) and call `plan(doc)` / `apply(doc)` from the bindings — they
 shell out to `bastion` with the generated `.bcl`.
 
 ## Layout

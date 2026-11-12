@@ -34,7 +34,7 @@ python examples/aws_s3.py
 ```
 
 To drive real infrastructure, install the CLI (`cargo install --path
-crates/bastion-cli`) and call `plan(doc)` / `apply(doc)` from the bindings — they
+crates/tpt-bastion-cli`) and call `plan(doc)` / `apply(doc)` from the bindings — they
 shell out to `bastion` with the generated `.bcl`.
 
 ## Layout

@@ -2,7 +2,7 @@
 
 This guide explains how to build a Bastion provider — the plugin that turns a
 compiled `.bcl` document into real infrastructure. It covers the Phase 5 plugin
-system in `crates/bastion-providers`.
+system in `crates/tpt-bastion-providers`.
 
 ## Vocabulary
 
@@ -21,11 +21,11 @@ system in `crates/bastion-providers`.
 ## The plugin trait
 
 ```rust
-use bastion_providers::plugin::{DataSourceRequest, ProviderPlugin, ResourceRequest};
-use bastion_providers::schema::{AttributeSpec, LifecycleOps, ProviderSchema,
+use tpt_bastion_providers::plugin::{DataSourceRequest, ProviderPlugin, ResourceRequest};
+use tpt_bastion_providers::schema::{AttributeSpec, LifecycleOps, ProviderSchema,
                                 ResourceTypeSpec, ValueType};
-use bastion_providers::error::ProviderError;
-use bastion_engine::provider::AppliedResource;
+use tpt_bastion_providers::error::ProviderError;
+use tpt_bastion_engine::provider::AppliedResource;
 
 pub struct MyProvider;
 
@@ -50,7 +50,7 @@ impl ProviderPlugin for MyProvider {
         // 1. Call the real mycloud API.
         // 2. Build the applied state (declared attrs + computed values).
         let mut attributes = req.attributes.clone();
-        attributes.insert("arn".into(), bastion_ir::Value::String(format!("arn:{}", req.id)));
+        attributes.insert("arn".into(), tpt_bastion_ir::Value::String(format!("arn:{}", req.id)));
         Ok(AppliedResource { id: req.id, type_name: req.type_name, attributes })
     }
 
@@ -73,7 +73,7 @@ stdin/stdout. Your crate's binary just serves the plugin:
 ```rust
 fn main() {
     let provider = MyProvider;
-    let _ = bastion_providers::abi::PluginServer::serve(
+    let _ = tpt_bastion_providers::abi::PluginServer::serve(
         &provider, std::io::stdin(), std::io::stdout());
 }
 ```
@@ -81,7 +81,7 @@ fn main() {
 ## Loading the plugin (host side)
 
 ```rust
-use bastion_providers::{NativeRuntime, PluginProvider, PluginRegistry};
+use tpt_bastion_providers::{NativeRuntime, PluginProvider, PluginRegistry};
 use std::sync::Arc;
 
 let runtime = NativeRuntime::new();
@@ -102,7 +102,7 @@ the compiled binary instead; everything else is identical.
 cargo run --bin bastion -- provider scaffold mycloud
 ```
 
-This emits `bastion-provider-mycloud/` with `lib.rs` (a working echo provider)
+This emits `tpt-bastion-provider-mycloud/` with `lib.rs` (a working echo provider)
 and `main.rs` (the server entry point). `cargo build` it, then load the binary
 with `SubprocessRuntime`.
 

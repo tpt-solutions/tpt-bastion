@@ -23,7 +23,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-/** A compile-time IR value, mirroring `bastion_ir::Value`. */
+/** A compile-time IR value, mirroring `tpt_bastion_ir::Value`. */
 export type BastionValue =
   | { kind: "string"; value: string }
   | { kind: "number"; value: number }
@@ -82,7 +82,7 @@ export interface BastionOutput {
   value: BastionValue;
 }
 
-/** A full Bastion document, mirroring `bastion_ir::Document`. */
+/** A full Bastion document, mirroring `tpt_bastion_ir::Document`. */
 export interface BastionDocument {
   config?: BastionConfig;
   variables?: BastionVariable[];

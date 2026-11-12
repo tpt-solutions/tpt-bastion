@@ -2,7 +2,7 @@
 
 This document is the authoritative reference for the Bastion configuration
 language, filename extension **`.bcl`**. It is kept in sync with the compiler in
-`crates/bastion-dsl` (lexer → parser → compiler → `bastion-ir`).
+`crates/tpt-bastion-dsl` (lexer → parser → compiler → `tpt-bastion-ir`).
 
 Bastion configs are declarative: you describe the desired infrastructure, and
 the toolchain compiles the document to a stable intermediate representation
@@ -273,7 +273,7 @@ Compiling this document:
 cargo run --bin bastion -- compile examples/aws_s3.bcl
 ```
 
-emits the `bastion-ir` `Document` as pretty JSON, with `ir_version` recorded so
+emits the `tpt-bastion-ir` `Document` as pretty JSON, with `ir_version` recorded so
 downstream consumers can gate on compatibility.
 
 ---
@@ -301,11 +301,11 @@ are tracked in `todo.md` and will extend this grammar:
 - Phase 2 — TypeScript/Python bindings (consume IR, not the DSL directly).
 - Phase 3 — Execution engine: references drive a dependency graph; `plan`/`apply`
   and `dry-run` operate on the IR.
-- Phase 4 — Native state management is implemented in the `bastion-state` crate:
+- Phase 4 — Native state management is implemented in the `tpt-bastion-state` crate:
   encrypted state files (AES-256-GCM + Argon2id), append-only version history,
   cooperative locking, drift detection, and automatic reconciliation. The CLI
   exposes it via `bastion state` and `bastion drift`.
-- Phase 5 — Provider plugin system is implemented in the `bastion-providers`
+- Phase 5 — Provider plugin system is implemented in the `tpt-bastion-providers`
   crate: the `ProviderPlugin` SDK/ABI, a capability schema format, a
   pluggable runtime (`NativeRuntime` in-process and `SubprocessRuntime` for
   isolated processes), a `PluginRegistry`, scaffolding, and a conformance

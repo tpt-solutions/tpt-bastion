@@ -10,11 +10,11 @@ models.
 Two options were on the table:
 
 1. **FFI / Wasm** — embed the Rust engine in the host language (e.g. a Wasm
-   build of `bastion-engine`, or `cbindgen` + a native addon). Highest fidelity,
+   build of `tpt-bastion-engine`, or `cbindgen` + a native addon). Highest fidelity,
    but each language needs a build/runtime shim and the engine must be
    Wasm-friendly today.
 2. **Codegen from IR + thin CLI client** *(chosen)* — bindings construct a
-   `BastionDocument` (typed mirror of `bastion_ir::Document`), render it to
+   `BastionDocument` (typed mirror of `tpt_bastion_ir::Document`), render it to
    `.bcl` source (or IR JSON), and drive the `bastion` CLI. No native build step,
    works everywhere the CLI runs, and stays correct as the engine evolves because
    it goes through the real compiler.
