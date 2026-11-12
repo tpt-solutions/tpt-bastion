@@ -3,7 +3,7 @@
 //! Azure provider for TPT Bastion (Phase 6 — core resource coverage).
 //!
 //! Initial provider: implements the
-//! [`ProviderPlugin`](bastion_providers::plugin::ProviderPlugin) SDK with a
+//! [`ProviderPlugin`](tpt_bastion_providers::plugin::ProviderPlugin) SDK with a
 //! broad set of core resource schemas (`azurerm_resource_group`,
 //! `azurerm_storage_account`, `azurerm_virtual_network`, `azurerm_key_vault`,
 //! `azurerm_sql_server`, `azurerm_linux_virtual_machine`) and a working
@@ -12,14 +12,14 @@
 //! (`azure_mgmt_*`) and authenticate via `DefaultAzureCredential`. The schema
 //! and engine integration are already correct.
 
-use bastion_engine::provider::AppliedResource;
-use bastion_ir::Value;
-use bastion_providers::error::ProviderError;
-use bastion_providers::plugin::{ProviderPlugin, ResourceRequest};
-use bastion_providers::schema::{
+use std::collections::BTreeMap;
+use tpt_bastion_engine::provider::AppliedResource;
+use tpt_bastion_ir::Value;
+use tpt_bastion_providers::error::ProviderError;
+use tpt_bastion_providers::plugin::{ProviderPlugin, ResourceRequest};
+use tpt_bastion_providers::schema::{
     AttributeSpec, LifecycleOps, ProviderSchema, ResourceTypeSpec, ValueType,
 };
-use std::collections::BTreeMap;
 
 /// The Azure provider.
 pub struct AzureProvider;
@@ -72,7 +72,10 @@ impl ProviderPlugin for AzureProvider {
                 ResourceTypeSpec::builder("azurerm_storage_account")
                     .description("An Azure Storage account.")
                     .attribute(AttributeSpec::required("name", ValueType::String))
-                    .attribute(AttributeSpec::required("resource_group_name", ValueType::String))
+                    .attribute(AttributeSpec::required(
+                        "resource_group_name",
+                        ValueType::String,
+                    ))
                     .attribute(AttributeSpec::required("location", ValueType::String))
                     .attribute(AttributeSpec::optional("account_tier", ValueType::String))
                     .attribute(AttributeSpec::computed("id", ValueType::String))
@@ -88,7 +91,10 @@ impl ProviderPlugin for AzureProvider {
                 ResourceTypeSpec::builder("azurerm_virtual_network")
                     .description("An Azure virtual network.")
                     .attribute(AttributeSpec::required("name", ValueType::String))
-                    .attribute(AttributeSpec::required("resource_group_name", ValueType::String))
+                    .attribute(AttributeSpec::required(
+                        "resource_group_name",
+                        ValueType::String,
+                    ))
                     .attribute(AttributeSpec::required("location", ValueType::String))
                     .attribute(AttributeSpec::required("address_space", ValueType::String))
                     .attribute(AttributeSpec::computed("id", ValueType::String))
@@ -104,7 +110,10 @@ impl ProviderPlugin for AzureProvider {
                 ResourceTypeSpec::builder("azurerm_key_vault")
                     .description("An Azure Key Vault.")
                     .attribute(AttributeSpec::required("name", ValueType::String))
-                    .attribute(AttributeSpec::required("resource_group_name", ValueType::String))
+                    .attribute(AttributeSpec::required(
+                        "resource_group_name",
+                        ValueType::String,
+                    ))
                     .attribute(AttributeSpec::required("location", ValueType::String))
                     .attribute(AttributeSpec::required("tenant_id", ValueType::String))
                     .attribute(AttributeSpec::computed("id", ValueType::String))
@@ -120,9 +129,15 @@ impl ProviderPlugin for AzureProvider {
                 ResourceTypeSpec::builder("azurerm_sql_server")
                     .description("An Azure SQL server.")
                     .attribute(AttributeSpec::required("name", ValueType::String))
-                    .attribute(AttributeSpec::required("resource_group_name", ValueType::String))
+                    .attribute(AttributeSpec::required(
+                        "resource_group_name",
+                        ValueType::String,
+                    ))
                     .attribute(AttributeSpec::required("location", ValueType::String))
-                    .attribute(AttributeSpec::required("administrator_login", ValueType::String))
+                    .attribute(AttributeSpec::required(
+                        "administrator_login",
+                        ValueType::String,
+                    ))
                     .attribute(AttributeSpec::computed("id", ValueType::String))
                     .lifecycle(LifecycleOps {
                         create: true,
@@ -136,7 +151,10 @@ impl ProviderPlugin for AzureProvider {
                 ResourceTypeSpec::builder("azurerm_linux_virtual_machine")
                     .description("A Linux Azure virtual machine.")
                     .attribute(AttributeSpec::required("name", ValueType::String))
-                    .attribute(AttributeSpec::required("resource_group_name", ValueType::String))
+                    .attribute(AttributeSpec::required(
+                        "resource_group_name",
+                        ValueType::String,
+                    ))
                     .attribute(AttributeSpec::required("location", ValueType::String))
                     .attribute(AttributeSpec::computed("id", ValueType::String))
                     .lifecycle(LifecycleOps {
@@ -156,9 +174,7 @@ impl ProviderPlugin for AzureProvider {
             "azurerm_resource_group" => {
                 let name = require_string(&req, "name")?;
                 // TODO(sdk): call azure_mgmt_resources client here.
-                format!(
-                    "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/{name}"
-                )
+                format!("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/{name}")
             }
             "azurerm_storage_account" => {
                 let name = require_string(&req, "name")?;
@@ -245,7 +261,7 @@ fn require_string(req: &ResourceRequest, key: &str) -> Result<String, ProviderEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastion_providers::conformance::assert_conforms;
+    use tpt_bastion_providers::conformance::assert_conforms;
 
     #[test]
     fn conforms_to_sdk() {

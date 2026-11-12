@@ -1,4 +1,4 @@
-# bastion-provider-terraform-shim
+# tpt-bastion-provider-terraform-shim
 
 Terraform / OpenTofu-compatible provider shim for TPT Bastion (Phase 6).
 

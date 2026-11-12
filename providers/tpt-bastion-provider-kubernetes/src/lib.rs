@@ -3,7 +3,7 @@
 //! Kubernetes provider for TPT Bastion (Phase 6 — core resource coverage).
 //!
 //! Initial provider: implements the
-//! [`ProviderPlugin`](bastion_providers::plugin::ProviderPlugin) SDK with a
+//! [`ProviderPlugin`](tpt_bastion_providers::plugin::ProviderPlugin) SDK with a
 //! broad set of core resource schemas (`kubernetes_namespace`,
 //! `kubernetes_deployment`, `kubernetes_service`, `kubernetes_config_map`,
 //! `kubernetes_secret`, `kubernetes_ingress`) and a working `create`/`delete`
@@ -12,14 +12,14 @@
 //! the kubeconfig / in-cluster config. The schema and engine integration are
 //! already correct.
 
-use bastion_engine::provider::AppliedResource;
-use bastion_ir::Value;
-use bastion_providers::error::ProviderError;
-use bastion_providers::plugin::{ProviderPlugin, ResourceRequest};
-use bastion_providers::schema::{
+use std::collections::BTreeMap;
+use tpt_bastion_engine::provider::AppliedResource;
+use tpt_bastion_ir::Value;
+use tpt_bastion_providers::error::ProviderError;
+use tpt_bastion_providers::plugin::{ProviderPlugin, ResourceRequest};
+use tpt_bastion_providers::schema::{
     AttributeSpec, LifecycleOps, ProviderSchema, ResourceTypeSpec, ValueType,
 };
-use std::collections::BTreeMap;
 
 /// The Kubernetes provider.
 pub struct KubernetesProvider;
@@ -230,7 +230,7 @@ fn require_string(req: &ResourceRequest, key: &str) -> Result<String, ProviderEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastion_providers::conformance::assert_conforms;
+    use tpt_bastion_providers::conformance::assert_conforms;
 
     #[test]
     fn conforms_to_sdk() {

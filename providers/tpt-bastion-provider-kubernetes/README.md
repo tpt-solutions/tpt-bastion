@@ -1,4 +1,4 @@
-# bastion-provider-kubernetes
+# tpt-bastion-provider-kubernetes
 
 Kubernetes provider for TPT Bastion (Phase 6 — core resource coverage).
 

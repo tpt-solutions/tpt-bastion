@@ -3,7 +3,7 @@
 //! AWS provider for TPT Bastion (Phase 6 — core resource coverage).
 //!
 //! This crate is the **initial** AWS provider. It implements the
-//! [`ProviderPlugin`](bastion_providers::plugin::ProviderPlugin) SDK with a
+//! [`ProviderPlugin`](tpt_bastion_providers::plugin::ProviderPlugin) SDK with a
 //! broad set of core resource schemas (`aws_s3_bucket`, `aws_dynamodb_table`,
 //! `aws_iam_role`, `aws_security_group`, `aws_vpc`, `aws_sqs_queue`,
 //! `aws_lambda_function`) and working `create`/`delete` that record applied
@@ -14,17 +14,17 @@
 //! engine integration are already correct, so the SDK swap is mechanical.
 //!
 //! The provider is loaded like any other: register it with a
-//! [`NativeRuntime`](bastion_providers::plugin::NativeRuntime) or ship it as a
+//! [`NativeRuntime`](tpt_bastion_providers::plugin::NativeRuntime) or ship it as a
 //! subprocess plugin via the provider ABI.
 
-use bastion_engine::provider::AppliedResource;
-use bastion_ir::Value;
-use bastion_providers::error::ProviderError;
-use bastion_providers::plugin::{ProviderPlugin, ResourceRequest};
-use bastion_providers::schema::{
+use std::collections::BTreeMap;
+use tpt_bastion_engine::provider::AppliedResource;
+use tpt_bastion_ir::Value;
+use tpt_bastion_providers::error::ProviderError;
+use tpt_bastion_providers::plugin::{ProviderPlugin, ResourceRequest};
+use tpt_bastion_providers::schema::{
     AttributeSpec, LifecycleOps, ProviderSchema, ResourceTypeSpec, ValueType,
 };
-use std::collections::BTreeMap;
 
 /// The AWS provider.
 pub struct AwsProvider;
@@ -92,7 +92,10 @@ impl ProviderPlugin for AwsProvider {
                 ResourceTypeSpec::builder("aws_iam_role")
                     .description("An IAM role.")
                     .attribute(AttributeSpec::required("name", ValueType::String))
-                    .attribute(AttributeSpec::optional("assume_role_policy", ValueType::String))
+                    .attribute(AttributeSpec::optional(
+                        "assume_role_policy",
+                        ValueType::String,
+                    ))
                     .attribute(AttributeSpec::computed("id", ValueType::String))
                     .attribute(AttributeSpec::computed("arn", ValueType::String))
                     .lifecycle(LifecycleOps {
@@ -224,7 +227,9 @@ impl ProviderPlugin for AwsProvider {
                 attributes.insert("id".to_string(), Value::String(name.clone()));
                 attributes.insert(
                     "url".to_string(),
-                    Value::String(format!("https://sqs.us-east-1.amazonaws.com/123456789012/{name}")),
+                    Value::String(format!(
+                        "https://sqs.us-east-1.amazonaws.com/123456789012/{name}"
+                    )),
                 );
             }
             "aws_lambda_function" => {
@@ -300,7 +305,7 @@ fn require_string(req: &ResourceRequest, key: &str) -> Result<String, ProviderEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastion_providers::conformance::assert_conforms;
+    use tpt_bastion_providers::conformance::assert_conforms;
 
     #[test]
     fn conforms_to_sdk() {
@@ -321,7 +326,10 @@ mod tests {
     fn creates_s3_with_computed_outputs() {
         let p = AwsProvider::new();
         let applied = p.create(req("aws_s3_bucket", "my-bucket")).unwrap();
-        assert_eq!(applied.attributes.get("arn"), Some(&Value::String("arn:aws:s3:::my-bucket".into())));
+        assert_eq!(
+            applied.attributes.get("arn"),
+            Some(&Value::String("arn:aws:s3:::my-bucket".into()))
+        );
         assert!(p.schema().resource("aws_s3_bucket").is_some());
     }
 
@@ -336,7 +344,10 @@ mod tests {
     fn computes_vpc_id_from_cidr() {
         let p = AwsProvider::new();
         let mut attributes = BTreeMap::new();
-        attributes.insert("cidr_block".to_string(), Value::String("10.0.0.0/16".into()));
+        attributes.insert(
+            "cidr_block".to_string(),
+            Value::String("10.0.0.0/16".into()),
+        );
         let applied = p
             .create(ResourceRequest {
                 id: "aws_vpc.demo".into(),

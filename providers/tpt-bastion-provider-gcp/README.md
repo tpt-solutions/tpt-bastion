@@ -1,4 +1,4 @@
-# bastion-provider-gcp
+# tpt-bastion-provider-gcp
 
 Google Cloud provider for TPT Bastion (Phase 6 — core resource coverage).
 

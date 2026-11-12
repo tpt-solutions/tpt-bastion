@@ -14,16 +14,16 @@
 //! HCL, so coverage grows as you install upstream providers. References are not
 //! yet translated (HCL needs concrete values); resolve them in the DSL first.
 
-use bastion_engine::provider::AppliedResource;
-use bastion_ir::Value;
-use bastion_providers::error::ProviderError;
-use bastion_providers::plugin::{ProviderPlugin, ResourceRequest};
-use bastion_providers::schema::{
-    AttributeSpec, LifecycleOps, ProviderSchema, ResourceTypeSpec, ValueType,
-};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
+use tpt_bastion_engine::provider::AppliedResource;
+use tpt_bastion_ir::Value;
+use tpt_bastion_providers::error::ProviderError;
+use tpt_bastion_providers::plugin::{ProviderPlugin, ResourceRequest};
+use tpt_bastion_providers::schema::{
+    AttributeSpec, LifecycleOps, ProviderSchema, ResourceTypeSpec, ValueType,
+};
 
 /// The Terraform-compatible shim provider.
 pub struct TerraformShimProvider;

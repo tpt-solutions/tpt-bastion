@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 
 [package]
-name = "bastion-provider-terraform-shim"
+name = "tpt-bastion-provider-terraform-shim"
 description = "Terraform/OpenTofu-compatible provider shim for TPT Bastion"
 version.workspace = true
 edition.workspace = true
@@ -10,15 +10,15 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-documentation = "https://docs.rs/bastion-provider-terraform-shim"
-keywords = ["iac", "terraform", "tofu", "terraform-provider", "bastion", "provider"]
-categories = ["command-line-utilities", "development-tools"]
+keywords = ["iac", "terraform", "tofu", "shim", "provider"]
+categories = ["development-tools", "api-bindings"]
+documentation = "https://docs.rs/tpt-bastion-provider-terraform-shim"
 readme = "README.md"
 
 [dependencies]
-bastion-ir = { path = "../../crates/bastion-ir" }
-bastion-engine = { path = "../../crates/bastion-engine" }
-bastion-providers = { path = "../../crates/bastion-providers" }
+tpt-bastion-ir = { path = "../../crates/tpt-bastion-ir" }
+tpt-bastion-engine = { path = "../../crates/tpt-bastion-engine" }
+tpt-bastion-providers = { path = "../../crates/tpt-bastion-providers" }
 serde = { workspace = true }
 
 [package.metadata.docs.rs]

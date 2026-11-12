@@ -3,16 +3,16 @@
 # Bastion provider tracks (Phase 6)
 
 Independent, publishable provider crates that implement the
-[`ProviderPlugin`](https://docs.rs/bastion-providers) SDK. Each is loaded by the
+[`ProviderPlugin`](https://docs.rs/tpt-bastion-providers) SDK. Each is loaded by the
 Bastion engine the same way as the built-in `null` provider.
 
 | Crate                        | Provider     | Status                                                        |
 | ---------------------------- | ------------ | ------------------------------------------------------------- |
-| `providers/aws`              | `aws`        | Initial: `aws_s3_bucket`, `aws_dynamodb_table` schemas + lifecycle. Real `aws-sdk-*` calls stubbed (`TODO(sdk)`). |
-| `providers/gcp`              | `google`     | Initial: `google_storage_bucket` schema + lifecycle. Real SDK calls stubbed. |
-| `providers/azure`            | `azurerm`    | Initial: `azurerm_resource_group` schema + lifecycle. Real SDK calls stubbed. |
-| `providers/kubernetes`       | `kubernetes` | Initial: `kubernetes_namespace` schema + lifecycle. Real `kube` calls stubbed. |
-| `providers/terraform-shim`   | `terraform-shim` | Working interop: renders HCL and drives `terraform`/`tofu`. |
+| `providers/tpt-bastion-provider-aws`              | `aws`        | Initial: `aws_s3_bucket`, `aws_dynamodb_table` schemas + lifecycle. Real `aws-sdk-*` calls stubbed (`TODO(sdk)`). |
+| `providers/tpt-bastion-provider-gcp`              | `google`     | Initial: `google_storage_bucket` schema + lifecycle. Real SDK calls stubbed. |
+| `providers/tpt-bastion-provider-azure`            | `azurerm`    | Initial: `azurerm_resource_group` schema + lifecycle. Real SDK calls stubbed. |
+| `providers/tpt-bastion-provider-kubernetes`       | `kubernetes` | Initial: `kubernetes_namespace` schema + lifecycle. Real `kube` calls stubbed. |
+| `providers/tpt-bastion-provider-terraform-shim`   | `terraform-shim` | Working interop: renders HCL and drives `terraform`/`tofu`. |
 
 ## What "initial coverage" means
 

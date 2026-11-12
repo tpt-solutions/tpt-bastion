@@ -3,7 +3,7 @@
 //! Google Cloud provider for TPT Bastion (Phase 6 — core resource coverage).
 //!
 //! Initial provider: implements the
-//! [`ProviderPlugin`](bastion_providers::plugin::ProviderPlugin) SDK with a
+//! [`ProviderPlugin`](tpt_bastion_providers::plugin::ProviderPlugin) SDK with a
 //! broad set of core resource schemas (`google_storage_bucket`,
 //! `google_compute_instance`, `google_compute_network`, `google_pubsub_topic`,
 //! `google_sql_database_instance`, `google_container_cluster`) and a working
@@ -13,14 +13,14 @@
 //! application-default chain. The schema and engine integration are already
 //! correct.
 
-use bastion_engine::provider::AppliedResource;
-use bastion_ir::Value;
-use bastion_providers::error::ProviderError;
-use bastion_providers::plugin::{ProviderPlugin, ResourceRequest};
-use bastion_providers::schema::{
+use std::collections::BTreeMap;
+use tpt_bastion_engine::provider::AppliedResource;
+use tpt_bastion_ir::Value;
+use tpt_bastion_providers::error::ProviderError;
+use tpt_bastion_providers::plugin::{ProviderPlugin, ResourceRequest};
+use tpt_bastion_providers::schema::{
     AttributeSpec, LifecycleOps, ProviderSchema, ResourceTypeSpec, ValueType,
 };
-use std::collections::BTreeMap;
 
 /// The Google Cloud provider.
 pub struct GcpProvider;
@@ -113,7 +113,10 @@ impl ProviderPlugin for GcpProvider {
                 ResourceTypeSpec::builder("google_sql_database_instance")
                     .description("A Cloud SQL database instance.")
                     .attribute(AttributeSpec::required("name", ValueType::String))
-                    .attribute(AttributeSpec::optional("database_version", ValueType::String))
+                    .attribute(AttributeSpec::optional(
+                        "database_version",
+                        ValueType::String,
+                    ))
                     .attribute(AttributeSpec::computed("id", ValueType::String))
                     .attribute(AttributeSpec::computed("self_link", ValueType::String))
                     .lifecycle(LifecycleOps {
@@ -260,7 +263,7 @@ fn require_string(req: &ResourceRequest, key: &str) -> Result<String, ProviderEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastion_providers::conformance::assert_conforms;
+    use tpt_bastion_providers::conformance::assert_conforms;
 
     #[test]
     fn conforms_to_sdk() {

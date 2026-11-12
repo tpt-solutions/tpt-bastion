@@ -1,4 +1,4 @@
-# bastion-provider-azure
+# tpt-bastion-provider-azure
 
 Azure provider for TPT Bastion (Phase 6 — core resource coverage).
 

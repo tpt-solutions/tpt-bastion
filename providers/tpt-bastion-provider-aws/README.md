@@ -1,4 +1,4 @@
-# bastion-provider-aws
+# tpt-bastion-provider-aws
 
 AWS provider for TPT Bastion (Phase 6 — core resource coverage).
 
@@ -8,8 +8,8 @@ computes outputs (`id`, `arn`). Real `aws-sdk-*` calls are stubbed behind
 `// TODO(sdk)` markers.
 
 ```rust
-use bastion_providers::plugin::NativeRuntime;
-use bastion_provider_aws::AwsProvider;
+use tpt_bastion_providers::plugin::NativeRuntime;
+use tpt_bastion_provider_aws::AwsProvider;
 use std::sync::Arc;
 
 let runtime = NativeRuntime::new();
