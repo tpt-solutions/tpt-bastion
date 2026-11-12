@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+#
+# cargo-deny policy. Run locally with:
+#   cargo deny check licenses
+#
+# Policy: production (normal) dependencies may not be licensed under
+# Apache-2.0 alone. An Apache-2.0 dependency is accepted only when its
+# license expression offers an alternative that is on the allow list
+# (e.g. "Apache-2.0 OR MIT" is accepted via MIT). Dev-only dependencies
+# are excluded from the check.
+
+[graph]
+all-features = true
+exclude-dev = true
+
+[licenses]
+version = 2
+confidence-threshold = 0.93
+# Note: "Apache-2.0" is intentionally NOT listed. A bare Apache-2.0 license
+# fails the check; Apache-2.0 only passes inside an OR expression that
+# satisfies another allowed license.
+allow = [
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+    "Unlicense",
+]
