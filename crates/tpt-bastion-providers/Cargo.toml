@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+[package]
+name = "tpt-bastion-providers"
+description = "Provider plugin system (SDK, schema, runtime, registry) for TPT Bastion"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["iac", "provider", "plugin", "terraform", "sdk"]
+categories = ["development-tools", "api-bindings"]
+documentation = "https://docs.rs/tpt-bastion-providers"
+readme = "README.md"
+
+[dependencies]
+tpt-bastion-ir = { path = "../tpt-bastion-ir" }
+tpt-bastion-engine = { path = "../tpt-bastion-engine" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+cargo-arg = "--all-features"

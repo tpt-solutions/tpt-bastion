@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+[package]
+name = "tpt-bastion-state"
+description = "Encrypted, versioned, lock-aware native state management for TPT Bastion"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["iac", "state", "encryption", "terraform", "infrastructure"]
+categories = ["development-tools", "cryptography"]
+documentation = "https://docs.rs/tpt-bastion-state"
+readme = "README.md"
+
+[dependencies]
+tpt-bastion-ir = { path = "../tpt-bastion-ir" }
+tpt-bastion-engine = { path = "../tpt-bastion-engine" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+rand = { workspace = true }
+aes-gcm = { workspace = true }
+argon2 = { workspace = true }
+zeroize = { workspace = true }
+sha2 = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+cargo-arg = "--all-features"

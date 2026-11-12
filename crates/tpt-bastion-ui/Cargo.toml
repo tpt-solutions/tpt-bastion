@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+[package]
+name = "tpt-bastion-ui"
+description = "Local web dashboard for TPT Bastion (compile/plan/state/drift visualization)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["iac", "dashboard", "terraform", "web-ui", "infrastructure"]
+categories = ["command-line-utilities", "web-programming::http-server"]
+documentation = "https://docs.rs/tpt-bastion-ui"
+readme = "README.md"
+
+[dependencies]
+tpt-bastion-ir = { path = "../tpt-bastion-ir" }
+tpt-bastion-dsl = { path = "../tpt-bastion-dsl" }
+tpt-bastion-engine = { path = "../tpt-bastion-engine" }
+tpt-bastion-state = { path = "../tpt-bastion-state" }
+tpt-bastion-providers = { path = "../tpt-bastion-providers" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }

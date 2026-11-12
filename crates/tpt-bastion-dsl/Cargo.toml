@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+[package]
+name = "tpt-bastion-dsl"
+description = "Bastion DSL: a type-safe, declarative Infrastructure-as-Code configuration language that compiles to IR"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["iac", "dsl", "terraform", "configuration", "compiler"]
+categories = ["development-tools", "parser-implementations"]
+documentation = "https://docs.rs/tpt-bastion-dsl"
+readme = "README.md"
+
+[dependencies]
+tpt-bastion-ir = { path = "../tpt-bastion-ir" }
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+cargo-arg = "--all-features"
