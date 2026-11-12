@@ -174,9 +174,9 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           for crate in \
-            bastion-ir bastion-dsl bastion-engine bastion-state bastion-providers bastion-cli \
-            bastion-provider-aws bastion-provider-gcp bastion-provider-azure \
-            bastion-provider-kubernetes bastion-provider-terraform-shim; do
+            tpt-bastion-ir tpt-bastion-dsl tpt-bastion-engine tpt-bastion-state tpt-bastion-providers tpt-bastion-cli \
+            tpt-bastion-provider-aws tpt-bastion-provider-gcp tpt-bastion-provider-azure \
+            tpt-bastion-provider-kubernetes tpt-bastion-provider-terraform-shim; do
             echo "publishing $crate"
             cargo publish -p "$crate" --no-verify || true
             sleep 20

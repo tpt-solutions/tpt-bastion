@@ -1,12 +1,12 @@
 name: Docs
 
 # Builds the MkDocs Material site (mkdocs.yml) and publishes it to GitHub
-# Pages. Runs on pushes to main and on every release so the docs stay in sync
+# Pages. Runs on pushes to master and on every release so the docs stay in sync
 # with the code and the tagged version.
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - "docs/**"
       - "mkdocs.yml"

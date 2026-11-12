@@ -3,7 +3,7 @@
 #
 # Install script for the TPT Bastion CLI.
 #
-#   curl -fsSL https://raw.githubusercontent.com/tpt/bastion/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/tpt/bastion/master/scripts/install.sh | sh
 #
 # Downloads the latest (or a pinned --version) release asset for the current
 # OS/architecture from GitHub, extracts it, and places `bastion` on your PATH

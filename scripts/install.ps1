@@ -2,7 +2,7 @@
 
 # Install script for the TPT Bastion CLI on Windows (PowerShell).
 #
-#   irm https://raw.githubusercontent.com/tpt/bastion/main/scripts/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/tpt/bastion/master/scripts/install.ps1 | iex
 #
 # Downloads the latest (or -Version pinned) Windows release asset, extracts it,
 # and installs `bastion.exe` into $HOME\.local\bin (or -To <dir>).
