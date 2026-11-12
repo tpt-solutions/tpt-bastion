@@ -11,7 +11,7 @@ full phased roadmap (Phase 0 through Phase 10, zero to public launch) — check 
 starting work to see what phase is in progress and what's already checked off.
 
 Only the DSL → IR compiler pipeline plus the execution-engine foundation exist today (Phases 0–3,
-partially). The `bastion-engine` crate builds a dependency graph and a dry-run `plan` from IR. There
+partially). The `tpt-bastion-engine` crate builds a dependency graph and a dry-run `plan` from IR. There
 is no apply runtime, state management, provider system, or language bindings yet — don't assume they
 exist.
 
@@ -19,9 +19,9 @@ exist.
 
 ```sh
 cargo build --workspace                 # build everything
-cargo test --workspace                  # run all tests (unit tests live inline in each crate, e.g. bastion-dsl/src/lib.rs)
-cargo test -p bastion-dsl               # test a single crate
-cargo test -p bastion-dsl reports_lex_error_with_location   # run a single test by name
+cargo test --workspace                  # run all tests (unit tests live inline in each crate, e.g. tpt-bastion-dsl/src/lib.rs)
+cargo test -p tpt-bastion-dsl               # test a single crate
+cargo test -p tpt-bastion-dsl reports_lex_error_with_location   # run a single test by name
 cargo fmt --all -- --check              # CI's fmt check
 cargo clippy --workspace --all-targets -- -D warnings   # CI's lint check (warnings are errors)
 cargo run --bin bastion -- compile examples/aws_s3.bcl  # compile a .bcl file to IR JSON
@@ -29,15 +29,15 @@ cargo run --bin bastion -- plan examples/aws_s3.bcl     # dry-run plan from a .b
 ```
 
 CI (`.github/workflows/ci.yml`) runs build+test and fmt+clippy (with `-D warnings`) as separate
-jobs on every push/PR to `main`. Match this locally before considering work done.
+jobs on every push/PR to `master`. Match this locally before considering work done.
 
 ## Architecture
 
-Four crates under `crates/`, forming a strict pipeline: `bastion-dsl` depends on `bastion-ir`;
-`bastion-engine` depends on `bastion-ir`; `bastion-cli` depends on `bastion-dsl` and
-`bastion-engine`. Nothing depends on `bastion-cli`.
+Four crates under `crates/`, forming a strict pipeline: `tpt-bastion-dsl` depends on `tpt-bastion-ir`;
+`tpt-bastion-engine` depends on `tpt-bastion-ir`; `tpt-bastion-cli` depends on `tpt-bastion-dsl` and
+`tpt-bastion-engine`. Nothing depends on `tpt-bastion-cli`.
 
-- **`bastion-ir`** — the versioned, serializable IR (`Document`, `Resource`, `Value`, etc.) that
+- **`tpt-bastion-ir`** — the versioned, serializable IR (`Document`, `Resource`, `Value`, etc.) that
   everything downstream (execution engine, state backends, providers, future TS/Python bindings)
   will consume instead of the source DSL. `IR_VERSION` is a `u32` bumped only on breaking shape
   changes; `is_compatible()` gates consumers on it. `Value` is the universal typed value
@@ -45,9 +45,9 @@ Four crates under `crates/`, forming a strict pipeline: `bastion-dsl` depends on
   structured `Value::Reference { base, path }` rather than resolved, so a later execution engine
   can build the dependency graph from unevaluated IR.
 
-- **`bastion-dsl`** — the `.bcl` configuration language, compiled through three stages that map
+- **`tpt-bastion-dsl`** — the `.bcl` configuration language, compiled through three stages that map
   directly to files: `lexer.rs` (source → `Token`s) → `parser.rs` (tokens → `ast::Ast`) →
-  `compiler.rs` (AST → `bastion_ir::Document`). `lib.rs::compile_source()` is the single entry
+  `compiler.rs` (AST → `tpt_bastion_ir::Document`). `lib.rs::compile_source()` is the single entry
   point that chains all three and is what the CLI and (eventually) language bindings call.
   `ast::Block` is a generic top-level block shape (`kind`, optional `type_name`/`name` labels,
   ordered attributes) shared by every block kind (`config`, `resource`, `module`, `variable`,
@@ -56,14 +56,14 @@ Four crates under `crates/`, forming a strict pipeline: `bastion-dsl` depends on
   compile errors). All errors are `error::DslError`, split into `Lex`/`Parse`/`Compile` variants
   so the CLI can show the most relevant diagnostic; lex/parse errors carry line/col.
 
-- **`bastion-engine`** — the execution core. `graph.rs::DepGraph` builds a dependency graph purely
+- **`tpt-bastion-engine`** — the execution core. `graph.rs::DepGraph` builds a dependency graph purely
   from the IR's structured `Value::Reference` values and topologically orders it (Kahn's
   algorithm) with cycle and unknown-reference detection; `plan.rs::Plan` walks that order into a
   sequence of `Action`s. `lib.rs::plan_document()` is the convenience entry point (validates IR
   compatibility, builds graph, returns a plan). There is no real apply yet — providers (Phase 6)
   are required to mutate infrastructure.
 
-- **`bastion-cli`** — the `bastion` binary (clap-based). Has `compile` (`.bcl` → IR JSON) and
+- **`tpt-bastion-cli`** — the `bastion` binary (clap-based). Has `compile` (`.bcl` → IR JSON) and
   `plan` (dependency-ordered dry-run plan) subcommands. Later roadmap phases (apply/state) will
   add subcommands here.
 
@@ -78,3 +78,7 @@ inter-resource references.
   under `[workspace.package]` / `[workspace.dependencies]`; per-crate `Cargo.toml` files should
   inherit (`.workspace = true`) rather than restate them.
 - Each crate has its own `README.md` documenting its role and public API entry point.
+- Every crate's package name starts with `tpt-bastion-` (e.g. `tpt-bastion-dsl`, `tpt-bastion-provider-aws`);
+  the Rust import path uses underscores (`tpt_bastion_dsl`). The `bastion` binary name is unchanged.
+- Each crate has its own `README.md`, `CHANGELOG.md` (Keep a Changelog format), explicit `keywords`
+  (max 5) and `categories` (valid crates.io slugs) in its `Cargo.toml`.

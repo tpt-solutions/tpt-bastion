@@ -34,12 +34,12 @@ drift detection, a Wasm-ready provider runtime, and language bindings.
 
 | Crate             | Purpose                                                       |
 | ----------------- | ------------------------------------------------------------- |
-| `bastion-ir`      | The versioned intermediate representation.                   |
-| `bastion-dsl`     | The DSL lexer, parser, and AST→IR compiler.                  |
-| `bastion-engine`  | Dependency graph, planning, and parallel execution core.     |
-| `bastion-state`   | Encrypted, versioned, lock-aware native state management.    |
-| `bastion-providers` | Provider SDK, schema, runtime, registry, and scaffolding.  |
-| `bastion-cli`     | The `bastion` command-line tool.                             |
+| `tpt-bastion-ir`      | The versioned intermediate representation.                   |
+| `tpt-bastion-dsl`     | The DSL lexer, parser, and AST→IR compiler.                  |
+| `tpt-bastion-engine`  | Dependency graph, planning, and parallel execution core.     |
+| `tpt-bastion-state`   | Encrypted, versioned, lock-aware native state management.    |
+| `tpt-bastion-providers` | Provider SDK, schema, runtime, registry, and scaffolding.  |
+| `tpt-bastion-cli`     | The `bastion` command-line tool.                             |
 
 See [`docs/`](docs) for the language reference, provider guide, binding
 architecture, getting started, and the Terraform migration guide.
@@ -59,13 +59,13 @@ Pick whichever fits your workflow:
 
 ```sh
 # Install script (Linux/macOS)
-curl -fsSL https://raw.githubusercontent.com/tpt/bastion/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tpt/bastion/master/scripts/install.sh | sh
 
 # Install script (Windows, PowerShell)
-irm https://raw.githubusercontent.com/tpt/bastion/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/tpt/bastion/master/scripts/install.ps1 | iex
 
 # From source
-cargo install --path crates/bastion-cli
+cargo install --path crates/tpt-bastion-cli
 
 # Docker
 docker run --rm ghcr.io/tpt/bastion:latest --help
@@ -78,9 +78,9 @@ Homebrew, npm, and PyPI packages are published at release time; see
 
 ```
 crates/
-  bastion-ir/     IR types, versioning, serde
-  bastion-dsl/    DSL lexer, parser, AST, compiler
-  bastion-cli/    CLI entry point
+  tpt-bastion-ir/     IR types, versioning, serde
+  tpt-bastion-dsl/    DSL lexer, parser, AST, compiler
+  tpt-bastion-cli/    CLI entry point
 examples/         Example .bcl documents
 ```
 

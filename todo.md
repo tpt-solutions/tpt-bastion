@@ -85,3 +85,69 @@ Next-generation Infrastructure-as-Code platform in Rust. Tracks all phases from 
 - [x] Write migration guide from Terraform/OpenTofu
 - [ ] Publish public repository
 - [ ] Public launch announcement
+
+## Phase 11 — Hardening & Honesty (post-review)
+Findings from the project review. Several earlier `[x]` items above are overstated (real apply, cloud providers, Wasm host, live drift, install/brew entries); these tasks close the gaps.
+
+### 11.1 Correctness & security fixes
+- [ ] Events webhook + UI: compare secret/token with original case (only lowercase header names); fix webhook POST response; remove dead `header_len`
+- [ ] UI: add Origin/Host (CSRF) check on POST `/api/apply`; show file label from `/api/info`
+- [ ] Sandbox: make landlock policy actually read-only outside allowed paths; stop swallowing errors; document Windows/macOS limits
+- [ ] terraform-shim: per-resource workdir, persist tfstate, make `delete` really destroy, serialize per dir
+- [ ] Commit `todo 1260715.md` → `history/` move; stop ignoring and commit `Cargo.lock`
+
+### 11.2 Engine & provider plumbing
+- [ ] Extend `Provider` trait with `read` and `update`; add `ProviderRouter` (type prefix → provider)
+- [ ] Attribute-level plan diff (Create/Update/Replace/NoOp/Delete, "known after apply")
+- [ ] Executor: real update path, no-op for unchanged, rollback on delete failure, preserve untouched resources in state
+- [ ] `bastion apply` uses real providers (MockProvider only behind `--mock`); add `destroy` and `refresh`
+- [ ] Live drift detection via provider `read`
+- [ ] Provider config (region/credentials) from `config` block; `bastion events` accepts `--state`/passphrase
+
+### 11.3 Real cloud providers (replace `TODO(sdk)` echo stubs)
+- [ ] Kubernetes: real create/read/update/delete for all 6 resource types
+- [ ] AWS: real SDK calls for all 7 resource types; real ARNs; fix `aws_dynamodb_table` missing id; remove hardcoded account/region
+- [ ] GCP: real calls for all 6 resource types
+- [ ] Azure: real calls for all 6 resource types
+- [ ] Gated integration tests (kind, LocalStack, emulators) in a separate CI job
+
+### 11.4 Core CLI adoption tooling
+- [ ] `bastion init` project scaffolding
+- [ ] `bastion validate`
+- [ ] `bastion fmt` (+ `--check`)
+- [ ] `bastion doctor`
+- [ ] `bastion completions` (bash/zsh/fish/powershell)
+- [ ] `bastion graph` (DOT/mermaid) and `bastion output`
+- [ ] Colored plan diff, `--json` plan output, saved plan files (`--out`)
+- [ ] Source-span diagnostics with caret snippets and "did you mean" (incl. compile errors)
+- [ ] Compile-time reference validation
+- [ ] DSL: `count`/`for_each` expansion, variable default/usage checks, module expansion
+- [ ] `plan --explain` (why each change happens)
+- [ ] Policy-as-code: `policy {}` rules evaluated at plan time
+
+### 11.5 Terraform migration
+- [ ] New `bastion-import` crate: HCL2 `.tf` → `.bcl` converter with unsupported-construct reporting
+- [ ] `bastion import tf <dir>`
+- [ ] `bastion import state <terraform.tfstate>` → Bastion encrypted state
+- [ ] `bastion state rm/mv/pull/push`
+- [ ] Golden-file migration examples in `examples/migration/`; update migration guide
+
+### 11.6 Editor support
+- [ ] VS Code extension: TextMate grammar, language config, snippets, `.vsix` build in CI
+- [ ] `bastion-lsp` (diagnostics, formatting, hover/go-to-definition, resource-type completion) + `bastion lsp`
+- [ ] `bastion provider schema <name> --json` and generated provider docs
+
+### 11.7 Release & install pipeline
+- [ ] Consistent release asset names; fix `install.sh` / `install.ps1` 404s
+- [ ] Publish `SHA256SUMS` + signatures; verify checksums in install scripts; musl detection
+- [ ] Fix `cargo publish` order (add `bastion-events`, `bastion-ui`), remove `|| true` / `--no-verify`
+- [ ] Homebrew formula: real sha256 (auto-bump in release workflow); winget/scoop manifests
+- [ ] `setup-bastion` GitHub Action; Docker image smoke test in CI
+- [ ] CI: Windows/macOS test matrix, MSRV, cargo-deny/audit
+- [ ] TypeScript binding: build to `dist`, derive `ir_version` from CLI; publish bindings to npm/PyPI
+
+### 11.8 Docs honesty
+- [ ] Rewrite `CLAUDE.md`, `README.md` crate table/layout, crate and provider READMEs to match reality
+- [ ] Replace "Wasm" claims with "sandboxed subprocess provider ABI" (or build the Wasm host)
+- [ ] Remove "real-time drift" wording until live refresh ships; add provider/resource status matrix
+- [ ] Correct over-checked items in Phases 3–6 and 9
