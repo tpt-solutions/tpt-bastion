@@ -25,7 +25,9 @@ pub mod executor;
 pub mod graph;
 pub mod observability;
 pub mod plan;
+pub mod policy;
 pub mod provider;
+pub mod refresh;
 pub mod state;
 
 pub use error::EngineError;
@@ -33,7 +35,9 @@ pub use executor::Executor;
 pub use graph::DepGraph;
 pub use observability::{Event, EventHandler, NoopHandler, PrintingHandler};
 pub use plan::{Action, ActionKind, Plan};
+pub use policy::{evaluate as evaluate_policies, Violation};
 pub use provider::{AppliedResource, MockProvider, Provider};
+pub use refresh::{refresh_state, RefreshOutcome, RefreshReport};
 pub use state::State;
 
 use tpt_bastion_ir::{is_compatible, Document, IR_VERSION};
@@ -51,13 +55,34 @@ pub fn plan_document(doc: &Document) -> Result<Plan, EngineError> {
 /// Build a [`Plan`] from a document, diffing against `prior` state so that
 /// existing resources plan as updates and removed ones as deletes.
 pub fn plan_document_with_state(doc: &Document, prior: &State) -> Result<Plan, EngineError> {
+    plan_document_with_rules(doc, prior, &|_, _| false)
+}
+
+/// Like [`plan_document_with_state`], but changes to attributes that
+/// `requires_replace(type_name, attribute)` marks as immutable become replaces.
+pub fn plan_document_with_rules(
+    doc: &Document,
+    prior: &State,
+    requires_replace: &dyn Fn(&str, &str) -> bool,
+) -> Result<Plan, EngineError> {
     if !is_compatible(doc.ir_version) {
         return Err(EngineError::IncompatibleIr {
             found: doc.ir_version,
             max: IR_VERSION,
         });
     }
+    // Policies are checked before the plan is built: a violating document must
+    // never produce a plan that could be applied.
+    let violations = policy::evaluate(doc);
+    if !violations.is_empty() {
+        let text = violations
+            .iter()
+            .map(|v| format!("{}: {}: {}", v.policy, v.resource, v.message))
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(EngineError::PolicyViolation(text));
+    }
     let graph = DepGraph::build(doc)?;
     let order = graph.order()?;
-    Plan::from_order(doc, &order, prior)
+    Plan::from_order_with_rules(doc, &order, prior, requires_replace)
 }

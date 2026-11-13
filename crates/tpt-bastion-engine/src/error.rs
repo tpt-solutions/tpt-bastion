@@ -18,6 +18,9 @@ pub enum EngineError {
 
     /// A reference points at a base object (resource/module/variable) that does
     /// not exist in the document.
+    #[error("policy violation: {0}")]
+    PolicyViolation(String),
+
     #[error("unknown reference target `{0}` (no such resource or module)")]
     UnknownReference(String),
 

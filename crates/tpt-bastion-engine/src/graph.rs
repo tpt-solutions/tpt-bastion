@@ -304,6 +304,7 @@ mod tests {
             ],
             modules: vec![],
             outputs: vec![],
+            policies: vec![],
         };
         let g = DepGraph::build(&doc).unwrap();
         let order = g.order().unwrap();
@@ -321,6 +322,7 @@ mod tests {
             resources: vec![resource("t.a", "a", &["b"]), resource("t.b", "b", &["a"])],
             modules: vec![],
             outputs: vec![],
+            policies: vec![],
         };
         let g = DepGraph::build(&doc).unwrap();
         assert!(matches!(g.order(), Err(EngineError::Cycle { .. })));
@@ -335,6 +337,7 @@ mod tests {
             resources: vec![resource("t.a", "a", &["ghost"])],
             modules: vec![],
             outputs: vec![],
+            policies: vec![],
         };
         let g = DepGraph::build(&doc);
         assert!(matches!(g, Err(EngineError::UnknownReference(_))));

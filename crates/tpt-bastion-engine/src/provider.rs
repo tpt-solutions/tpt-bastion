@@ -60,6 +60,14 @@ pub trait Provider {
         )))
     }
 
+    /// Whether a change to `attribute` on resources of `type_name` cannot be made
+    /// in place. Such a change plans as a replace (destroy, then create). The
+    /// default is that no attribute requires replacement.
+    fn requires_replace(&self, type_name: &str, attribute: &str) -> bool {
+        let _ = (type_name, attribute);
+        false
+    }
+
     /// Destroy a previously-applied resource (used during rollback).
     fn destroy(&self, resource: &AppliedResource) -> Result<(), EngineError>;
 }
@@ -147,6 +155,12 @@ impl Provider for ProviderRouter {
 
     fn read(&self, current: &AppliedResource) -> Result<Option<AppliedResource>, EngineError> {
         self.provider_for(&current.type_name)?.read(current)
+    }
+
+    fn requires_replace(&self, type_name: &str, attribute: &str) -> bool {
+        self.provider_for(type_name)
+            .map(|p| p.requires_replace(type_name, attribute))
+            .unwrap_or(false)
     }
 
     fn destroy(&self, resource: &AppliedResource) -> Result<(), EngineError> {

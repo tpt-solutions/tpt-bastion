@@ -71,11 +71,12 @@ impl<P: Provider + Send + Sync> Executor<P> {
         // Build the create/update batches in level order (topo order keeps
         // levels non-decreasing, so consecutive equal-level actions batch up).
         let mut batches: Vec<(usize, Vec<&Action>)> = Vec::new();
-        for action in plan
-            .actions
-            .iter()
-            .filter(|a| matches!(a.kind, ActionKind::Create | ActionKind::Update))
-        {
+        for action in plan.actions.iter().filter(|a| {
+            matches!(
+                a.kind,
+                ActionKind::Create | ActionKind::Update | ActionKind::Replace
+            )
+        }) {
             let level = *levels.get(&action.id).unwrap_or(&0);
             match batches.last_mut() {
                 Some((lvl, items)) if *lvl == level => items.push(action),
@@ -123,26 +124,56 @@ impl<P: Provider + Send + Sync> Executor<P> {
 
             // Each outcome pairs the new record with the prior record it replaced
             // (updates only), so a later failure can revert the change.
-            type Outcome = Result<(AppliedResource, Option<AppliedResource>), EngineError>;
+            type Outcome = Result<(AppliedResource, Change), EngineError>;
             let results: Vec<Outcome> = resolved
                 .par_iter()
                 .zip(batch.par_iter())
                 .map(|(res, action)| {
                     self.handler
                         .handle(&Event::ResourceStart { id: res.id.clone() });
+                    let current_record = || {
+                        prior_by_id
+                            .get(res.id.as_str())
+                            .copied()
+                            .cloned()
+                            .ok_or_else(|| {
+                                EngineError::Provider(format!(
+                                    "no prior record for `{}` to change",
+                                    res.id
+                                ))
+                            })
+                    };
                     match action.kind {
                         ActionKind::Update => {
-                            let current: &AppliedResource =
-                                prior_by_id.get(res.id.as_str()).copied().ok_or_else(|| {
-                                    EngineError::Provider(format!(
-                                        "no prior record for `{}` to update",
-                                        res.id
-                                    ))
-                                })?;
-                            let updated = self.provider.update(current, res)?;
-                            Ok((updated, Some(current.clone())))
+                            let current = current_record()?;
+                            let updated = self.provider.update(&current, res)?;
+                            Ok((updated, Change::Updated(current)))
                         }
-                        _ => self.provider.create(res).map(|created| (created, None)),
+                        ActionKind::Replace => {
+                            // Destroy first: the id is shared, so the old resource
+                            // must be gone before the new one is created.
+                            let current = current_record()?;
+                            self.provider.destroy(&current)?;
+                            match self.provider.create(res) {
+                                Ok(created) => Ok((created, Change::Replaced(current))),
+                                Err(e) => {
+                                    // Put the old resource back so a failed replace
+                                    // leaves the infrastructure as it was.
+                                    let restore = resource_from_applied(&current);
+                                    match self.provider.create(&restore) {
+                                        Ok(_) => Err(e),
+                                        Err(r) => Err(EngineError::Provider(format!(
+                                            "{e}; restoring `{}` also failed: {r}",
+                                            res.id
+                                        ))),
+                                    }
+                                }
+                            }
+                        }
+                        _ => self
+                            .provider
+                            .create(res)
+                            .map(|created| (created, Change::Created)),
                     }
                 })
                 .collect();
@@ -151,18 +182,22 @@ impl<P: Provider + Send + Sync> Executor<P> {
             let mut failed: Option<EngineError> = None;
             for (res, outcome) in resolved.iter().zip(results) {
                 match outcome {
-                    Ok((applied_res, before)) => {
+                    Ok((applied_res, change)) => {
                         self.handler.handle(&Event::ResourceApplied {
                             resource: applied_res.clone(),
                             level,
                         });
                         applied_by_id.insert(applied_res.id.clone(), applied_res.clone());
-                        undo.push(match before {
-                            Some(before) => Undo::Revert {
+                        undo.push(match change {
+                            Change::Created => Undo::Destroy(applied_res.clone()),
+                            Change::Updated(before) => Undo::Revert {
                                 before,
                                 after: applied_res.clone(),
                             },
-                            None => Undo::Destroy(applied_res.clone()),
+                            Change::Replaced(before) => Undo::Replaced {
+                                before,
+                                after: applied_res.clone(),
+                            },
                         });
                         result.push(applied_res);
                     }
@@ -257,6 +292,14 @@ impl<P: Provider + Send + Sync> Executor<P> {
                         self.provider.create(&desired).map(|_| ()),
                     )
                 }
+                Undo::Replaced { before, after } => {
+                    let desired = resource_from_applied(before);
+                    let outcome = self
+                        .provider
+                        .destroy(after)
+                        .and_then(|_| self.provider.create(&desired).map(|_| ()));
+                    (before.id.clone(), outcome)
+                }
             };
             match outcome {
                 Ok(()) => self.handler.handle(&Event::ResourceRolledBack { id }),
@@ -286,6 +329,18 @@ enum Undo {
     },
     /// A resource was destroyed: create it again from its prior record.
     Recreate(AppliedResource),
+    /// A resource was replaced: destroy `after`, then recreate `before`.
+    Replaced {
+        before: AppliedResource,
+        after: AppliedResource,
+    },
+}
+
+/// What one successful action did, and the record it replaced if any.
+enum Change {
+    Created,
+    Updated(AppliedResource),
+    Replaced(AppliedResource),
 }
 
 /// Rebuild a desired [`Resource`] from a recorded one, used to revert an update.
@@ -434,6 +489,7 @@ mod tests {
             resources: vec![bucket, obj],
             modules: vec![],
             outputs: vec![],
+            policies: vec![],
         }
     }
 
@@ -514,6 +570,7 @@ mod update_tests {
             resources: vec![bucket(acl)],
             modules: vec![],
             outputs: vec![],
+            policies: vec![],
         }
     }
 
@@ -663,6 +720,7 @@ mod update_tests {
             resources: vec![],
             modules: vec![],
             outputs: vec![],
+            policies: vec![],
         };
         let plan = plan_document_with_state(&empty, &prior).unwrap();
 
@@ -679,6 +737,76 @@ mod update_tests {
             1,
             "`b` was destroyed before the failure and must be recreated"
         );
+    }
+
+    /// Declares `acl` immutable. Counts operations; `fail_create` refuses to create
+    /// the new version, to exercise the restore path.
+    #[derive(Default)]
+    struct Immutable {
+        creates: AtomicUsize,
+        destroys: AtomicUsize,
+        fail_create: bool,
+    }
+
+    impl Provider for Immutable {
+        fn create(&self, r: &Resource) -> Result<AppliedResource, EngineError> {
+            let n = self.creates.fetch_add(1, Ordering::SeqCst);
+            if self.fail_create && n == 0 {
+                return Err(EngineError::Provider("create refused".into()));
+            }
+            Ok(applied(r))
+        }
+        fn destroy(&self, _: &AppliedResource) -> Result<(), EngineError> {
+            self.destroys.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+        fn requires_replace(&self, _type: &str, attribute: &str) -> bool {
+            attribute == "acl"
+        }
+    }
+
+    fn replace_plan(prior: &State, d: &Document) -> Plan {
+        let order = vec!["aws_s3_bucket.b".to_string()];
+        Plan::from_order_with_rules(d, &order, prior, &|t, a| {
+            Immutable::default().requires_replace(t, a)
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn immutable_change_replaces_the_resource() {
+        let prior = initial_state("private");
+        let d = doc("public");
+        let plan = replace_plan(&prior, &d);
+        assert_eq!(plan.actions[0].kind, ActionKind::Replace);
+
+        let exec = Executor::new(Immutable::default(), Box::new(NoopHandler));
+        let state = exec.apply(&d, &plan, &prior).unwrap();
+        assert_eq!(exec.provider.destroys.load(Ordering::SeqCst), 1);
+        assert_eq!(exec.provider.creates.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            state.resources[0].attributes.get("acl"),
+            Some(&Value::String("public".into()))
+        );
+    }
+
+    #[test]
+    fn failed_replace_restores_the_old_resource() {
+        let prior = initial_state("private");
+        let d = doc("public");
+        let plan = replace_plan(&prior, &d);
+
+        let exec = Executor::new(
+            Immutable {
+                fail_create: true,
+                ..Immutable::default()
+            },
+            Box::new(NoopHandler),
+        );
+        assert!(exec.apply(&d, &plan, &prior).is_err());
+        // The old resource was destroyed, then recreated to restore it.
+        assert_eq!(exec.provider.destroys.load(Ordering::SeqCst), 1);
+        assert_eq!(exec.provider.creates.load(Ordering::SeqCst), 2);
     }
 
     #[test]

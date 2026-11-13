@@ -54,6 +54,9 @@ pub enum ActionKind {
     Read,
     /// The resource exists and matches the document. Nothing is applied.
     NoOp,
+    /// A changed attribute cannot be updated in place. The resource is destroyed
+    /// and created again.
+    Replace,
 }
 
 impl ActionKind {
@@ -65,6 +68,7 @@ impl ActionKind {
             ActionKind::Delete => "delete",
             ActionKind::Read => "read",
             ActionKind::NoOp => "no-op",
+            ActionKind::Replace => "replace",
         }
     }
 }
@@ -122,6 +126,7 @@ fn verb_color(kind: ActionKind) -> &'static str {
         ActionKind::Delete => "31",
         ActionKind::Read => "36",
         ActionKind::NoOp => "2",
+        ActionKind::Replace => "35",
     }
 }
 
@@ -135,7 +140,7 @@ fn paint(text: &str, code: &str, color: bool) -> String {
 }
 
 /// Render a value for plan output.
-fn display_value(value: &Value) -> String {
+pub(crate) fn display_value(value: &Value) -> String {
     match value {
         Value::String(s) => format!("\"{s}\""),
         Value::Number(n) => format!("{n}"),
@@ -177,6 +182,17 @@ impl Plan {
         order: &[String],
         prior: &State,
     ) -> Result<Plan, EngineError> {
+        Self::from_order_with_rules(doc, order, prior, &|_, _| false)
+    }
+
+    /// Like [`Plan::from_order`], but an update becomes a replace when
+    /// `requires_replace(type_name, attribute)` is true for any changed attribute.
+    pub fn from_order_with_rules(
+        doc: &Document,
+        order: &[String],
+        prior: &State,
+        requires_replace: &dyn Fn(&str, &str) -> bool,
+    ) -> Result<Plan, EngineError> {
         let by_id: HashMap<&str, &Resource> =
             doc.resources.iter().map(|r| (r.id.as_str(), r)).collect();
         let prior_by_id: HashMap<&str, &crate::provider::AppliedResource> =
@@ -195,6 +211,11 @@ impl Plan {
                     let changes = diff_attributes(&res.attributes, &existing.attributes);
                     if changes.is_empty() {
                         (ActionKind::NoOp, changes)
+                    } else if changes
+                        .iter()
+                        .any(|c| requires_replace(&res.type_name, &c.name))
+                    {
+                        (ActionKind::Replace, changes)
                     } else {
                         (ActionKind::Update, changes)
                     }
@@ -237,6 +258,47 @@ impl Plan {
         self.render_with(false)
     }
 
+    /// One line per action saying why it is planned: which attributes changed,
+    /// why a resource is created or deleted, and why a no-op is a no-op.
+    pub fn explain(&self) -> String {
+        let mut out = String::new();
+        for action in &self.actions {
+            let names: Vec<String> = action
+                .changes
+                .iter()
+                .map(|c| {
+                    if c.known_after_apply {
+                        format!("{} (known after apply)", c.name)
+                    } else {
+                        c.name.clone()
+                    }
+                })
+                .collect();
+            let reason = match action.kind {
+                ActionKind::Create => "no record for this id in the prior state".to_string(),
+                ActionKind::Update => {
+                    format!("{} attribute(s) changed: {}", names.len(), names.join(", "))
+                }
+                ActionKind::Replace => format!(
+                    "attribute(s) that cannot change in place changed: {}",
+                    names.join(", ")
+                ),
+                ActionKind::NoOp => "the declared attributes match the prior state".to_string(),
+                ActionKind::Delete => {
+                    "recorded in state but no longer declared in the document".to_string()
+                }
+                ActionKind::Read => "read only".to_string(),
+            };
+            out.push_str(&format!(
+                "  {} {}: {}\n",
+                action.kind.verb(),
+                action.id,
+                reason
+            ));
+        }
+        out
+    }
+
     /// Render like [`Plan::render`], with ANSI colors on the action verbs.
     /// Callers should use this only when the output is a terminal.
     pub fn render_colored(&self) -> String {
@@ -249,9 +311,14 @@ impl Plan {
             out.push_str("Plan: no actions (document has no resources).\n");
             return out;
         }
+        let to_replace = self
+            .actions
+            .iter()
+            .filter(|a| a.kind == ActionKind::Replace)
+            .count();
         out.push_str(&format!(
-            "Plan: {} to create, {} to update, {} to delete, {} unchanged.\n",
-            self.to_create, self.to_update, self.to_delete, self.unchanged
+            "Plan: {} to create, {} to update, {} to replace, {} to delete, {} unchanged.\n",
+            self.to_create, self.to_update, to_replace, self.to_delete, self.unchanged
         ));
         out.push('\n');
         for (i, action) in self.actions.iter().enumerate() {
@@ -381,6 +448,7 @@ mod tests {
             resources: vec![res],
             modules: vec![],
             outputs: vec![],
+            policies: vec![],
         };
         let prior = State::from_applied(vec![AppliedResource {
             id: "aws_s3_bucket.b".into(),

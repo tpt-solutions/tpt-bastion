@@ -33,6 +33,7 @@ fn make_doc(n: usize) -> Document {
         resources,
         modules: vec![],
         outputs: vec![],
+        policies: vec![],
     }
 }
 
