@@ -102,7 +102,64 @@ pub fn compile(ast: &crate::ast::Ast) -> Result<Document, DslError> {
         }
     }
 
+    check_references(&doc)?;
     Ok(doc)
+}
+
+/// Every reference base mentioned in `value`, including nested lists and maps.
+fn collect_reference_bases(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::Reference { base, .. } => out.push(base.clone()),
+        Value::List(items) => items
+            .iter()
+            .for_each(|item| collect_reference_bases(item, out)),
+        Value::Map(map) => map
+            .values()
+            .for_each(|item| collect_reference_bases(item, out)),
+        _ => {}
+    }
+}
+
+/// Reject references to names that cannot be resolved, so the error appears at
+/// compile time rather than at plan time.
+///
+/// Only resources can be referenced today. A reference to a variable or module
+/// is rejected here too, with a message saying so, because the engine cannot
+/// resolve it either.
+fn check_references(doc: &Document) -> Result<(), DslError> {
+    let resource_names: std::collections::HashSet<&str> =
+        doc.resources.iter().map(|r| r.name.as_str()).collect();
+    let variable_names: std::collections::HashSet<&str> =
+        doc.variables.iter().map(|v| v.name.as_str()).collect();
+
+    let check = |owner: &str, value: &Value| -> Result<(), DslError> {
+        let mut bases = Vec::new();
+        collect_reference_bases(value, &mut bases);
+        for base in bases {
+            if resource_names.contains(base.as_str()) {
+                continue;
+            }
+            let detail = if variable_names.contains(base.as_str()) {
+                "variables cannot be referenced yet".to_string()
+            } else {
+                "no resource has that name".to_string()
+            };
+            return Err(DslError::Compile {
+                message: format!("{owner} references unknown `{base}`: {detail}"),
+            });
+        }
+        Ok(())
+    };
+
+    for resource in &doc.resources {
+        for value in resource.attributes.values() {
+            check(&format!("`{}`", resource.id), value)?;
+        }
+    }
+    for output in &doc.outputs {
+        check(&format!("output `{}`", output.name), &output.value)?;
+    }
+    Ok(())
 }
 
 fn compile_config(block: &Block) -> Result<Config, DslError> {

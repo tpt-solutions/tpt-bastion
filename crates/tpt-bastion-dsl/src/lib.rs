@@ -34,6 +34,7 @@
 pub mod ast;
 pub mod compiler;
 pub mod error;
+pub mod format;
 pub mod lexer;
 pub mod parser;
 
@@ -126,6 +127,28 @@ mod tests {
             resource aws_s3_bucket a { bucket = "y" }
         "#;
         assert!(compile_source(src).is_err());
+    }
+
+    #[test]
+    fn rejects_reference_to_unknown_resource_at_compile_time() {
+        let src = r#"
+            resource aws_s3_bucket a { bucket = nope.bucket }
+        "#;
+        let err = compile_source(src).unwrap_err();
+        assert!(err.to_string().contains("unknown `nope`"), "{err}");
+    }
+
+    #[test]
+    fn rejects_reference_to_variable_with_a_clear_message() {
+        let src = r#"
+            variable region { default = "us-east-1" }
+            resource aws_s3_bucket a { bucket = region.value }
+        "#;
+        let err = compile_source(src).unwrap_err();
+        assert!(
+            err.to_string().contains("variables cannot be referenced"),
+            "{err}"
+        );
     }
 
     #[test]
