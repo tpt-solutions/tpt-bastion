@@ -4,8 +4,8 @@
 //!
 //! The CLI drives the full pipeline: it reads a `.bcl` document, compiles it to
 //! IR, builds a dependency-ordered plan (dry-run), and can `apply` that plan
-//! through the execution engine. `apply` uses the in-tree [`MockProvider`] until
-//! the Wasm provider runtime (Phase 6) lands.
+//! through the execution engine. `apply` currently uses the in-tree
+//! [`MockProvider`]; real providers are not yet wired into the CLI.
 //!
 //! State is managed by [`tpt_bastion_state`] (Phase 4): `apply` and `plan` read and
 //! write state through a [`StateBackend`] (plaintext or encrypted, lock-aware),
@@ -67,6 +67,10 @@ enum Command {
         /// Environment variable holding the state encryption passphrase.
         #[arg(long, value_name = "VAR")]
         passphrase_env: Option<String>,
+
+        /// Print the plan as a JSON object instead of text.
+        #[arg(long)]
+        json: bool,
     },
 
     /// Apply an execution plan, creating/updating infrastructure.
@@ -159,6 +163,94 @@ enum Command {
         #[arg(long)]
         allow_apply: bool,
     },
+
+    /// Check a `.bcl` document: compile it and verify its dependency graph.
+    Validate {
+        /// Path to the `.bcl` source file. Use `-` to read from stdin.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+    },
+
+    /// Print the resource dependency graph as Graphviz DOT or Mermaid.
+    Graph {
+        /// Path to the `.bcl` source file. Use `-` to read from stdin.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = GraphFormat::Dot)]
+        format: GraphFormat,
+    },
+
+    /// Format `.bcl` files in canonical style (indentation, blank lines).
+    Fmt {
+        /// Files to format. Use `-` to read stdin and write stdout.
+        #[arg(value_name = "FILE")]
+        files: Vec<PathBuf>,
+
+        /// Do not write; exit non-zero if any file would change.
+        #[arg(long)]
+        check: bool,
+    },
+
+    /// Scaffold a starter project (`main.bcl`) in a directory.
+    Init {
+        /// Directory to create the project in (default: current directory).
+        #[arg(value_name = "DIR", default_value = ".")]
+        dir: PathBuf,
+    },
+
+    /// Print the document's outputs, resolved against recorded state.
+    Output {
+        /// Path to the `.bcl` source file. Use `-` to read from stdin.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// State file holding the applied resources.
+        #[arg(long, value_name = "PATH")]
+        state: PathBuf,
+
+        /// Environment variable holding the state encryption passphrase.
+        #[arg(long, value_name = "VAR")]
+        passphrase_env: Option<String>,
+
+        /// Print only the output with this name.
+        #[arg(long, value_name = "NAME")]
+        name: Option<String>,
+
+        /// Print all outputs as a JSON object.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Check the environment, a document, and a state file for common problems.
+    Doctor {
+        /// Optional `.bcl` document to compile and validate.
+        #[arg(long, value_name = "FILE")]
+        file: Option<PathBuf>,
+
+        /// Optional state file to check for readability and integrity.
+        #[arg(long, value_name = "PATH")]
+        state: Option<PathBuf>,
+
+        /// Environment variable holding the state encryption passphrase.
+        #[arg(long, value_name = "VAR")]
+        passphrase_env: Option<String>,
+    },
+
+    /// Generate a shell completion script on stdout.
+    Completions {
+        /// Shell to generate completions for.
+        #[arg(value_name = "SHELL")]
+        shell: clap_complete::Shell,
+    },
+}
+
+/// Output formats for `bastion graph`.
+#[derive(Clone, Copy, ValueEnum)]
+enum GraphFormat {
+    Dot,
+    Mermaid,
 }
 
 /// What to do via the `events` subcommand.
@@ -241,7 +333,8 @@ fn main() -> Result<()> {
             file,
             state,
             passphrase_env,
-        } => cmd_plan(&file, state.as_ref(), passphrase_env.as_deref()),
+            json,
+        } => cmd_plan(&file, state.as_ref(), passphrase_env.as_deref(), json),
         Command::Apply {
             file,
             state,
@@ -266,6 +359,38 @@ fn main() -> Result<()> {
         } => cmd_drift(&file, &state, passphrase_env.as_deref(), reconcile),
         Command::Provider { action } => cmd_provider(&action),
         Command::Events { action } => cmd_events(&action),
+        Command::Validate { file } => cmd_validate(&file),
+        Command::Graph { file, format } => cmd_graph(&file, format),
+        Command::Init { dir } => cmd_init(&dir),
+        Command::Fmt { files, check } => cmd_fmt(&files, check),
+        Command::Output {
+            file,
+            state,
+            passphrase_env,
+            name,
+            json,
+        } => cmd_output(
+            &file,
+            &state,
+            passphrase_env.as_deref(),
+            name.as_deref(),
+            json,
+        ),
+        Command::Doctor {
+            file,
+            state,
+            passphrase_env,
+        } => cmd_doctor(file.as_ref(), state.as_ref(), passphrase_env.as_deref()),
+        Command::Completions { shell } => {
+            use clap::CommandFactory;
+            clap_complete::generate(
+                shell,
+                &mut Cli::command(),
+                "bastion",
+                &mut std::io::stdout(),
+            );
+            Ok(())
+        }
         Command::Ui {
             file,
             state,
@@ -369,7 +494,7 @@ fn cmd_events(action: &EventsAction) -> Result<()> {
 }
 
 fn cmd_ui(
-    file: &PathBuf,
+    file: &std::path::Path,
     state: Option<&PathBuf>,
     port: u16,
     token_env: Option<&str>,
@@ -388,7 +513,7 @@ fn cmd_ui(
         None => None,
     };
     let config = tpt_bastion_ui::UiConfig {
-        file: file.clone(),
+        file: file.to_path_buf(),
         state: state.cloned(),
         port,
         token,
@@ -396,6 +521,420 @@ fn cmd_ui(
         allow_apply,
     };
     tpt_bastion_ui::serve(config)
+}
+
+/// `bastion validate`: compile the document and build its dependency graph,
+/// which also rejects cycles and references to unknown objects.
+fn cmd_validate(file: &PathBuf) -> Result<()> {
+    let source = read_source(file)?;
+    let doc = compile_source(&source).map_err(|e| anyhow::anyhow!("compile failed: {e}"))?;
+    let graph = tpt_bastion_engine::DepGraph::build(&doc)
+        .map_err(|e| anyhow::anyhow!("dependency check failed: {e}"))?;
+    let order = graph
+        .order()
+        .map_err(|e| anyhow::anyhow!("dependency check failed: {e}"))?;
+    println!(
+        "ok: {} node(s), {} resource(s), {} output(s) in dependency order",
+        order.len(),
+        doc.resources.len(),
+        doc.outputs.len()
+    );
+    Ok(())
+}
+
+/// `bastion graph`: render the dependency graph. Edges point from a node to
+/// the node that depends on it, so the diagram reads in creation order.
+fn cmd_graph(file: &PathBuf, format: GraphFormat) -> Result<()> {
+    let source = read_source(file)?;
+    let doc = compile_source(&source).map_err(|e| anyhow::anyhow!("compile failed: {e}"))?;
+    let graph = tpt_bastion_engine::DepGraph::build(&doc)
+        .map_err(|e| anyhow::anyhow!("dependency check failed: {e}"))?;
+    let mut nodes = graph.nodes.clone();
+    nodes.sort();
+
+    let mut edges: Vec<(String, String)> = Vec::new();
+    for node in &nodes {
+        if let Some(deps) = graph.deps.get(node) {
+            for dep in deps {
+                edges.push((dep.clone(), node.clone()));
+            }
+        }
+    }
+    edges.sort();
+
+    match format {
+        GraphFormat::Dot => {
+            println!("digraph bastion {{");
+            println!("  rankdir=LR;");
+            for node in &nodes {
+                println!("  \"{}\";", node.replace('"', "\\\""));
+            }
+            for (from, to) in &edges {
+                println!(
+                    "  \"{}\" -> \"{}\";",
+                    from.replace('"', "\\\""),
+                    to.replace('"', "\\\"")
+                );
+            }
+            println!("}}");
+        }
+        GraphFormat::Mermaid => {
+            println!("graph LR");
+            // Mermaid ids cannot contain dots, so map each node to an index.
+            let index: std::collections::HashMap<&String, usize> =
+                nodes.iter().enumerate().map(|(i, n)| (n, i)).collect();
+            for node in &nodes {
+                println!("  n{}[\"{}\"]", index[node], node.replace('"', "'"));
+            }
+            for (from, to) in &edges {
+                println!("  n{} --> n{}", index[from], index[to]);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Resolve a document value against the document's variables and the recorded
+/// state. References read the attribute of the applied resource they name.
+fn resolve_output_value(
+    value: &tpt_bastion_ir::Value,
+    doc: &tpt_bastion_ir::Document,
+    state: &BastionState,
+) -> Result<tpt_bastion_ir::Value> {
+    use tpt_bastion_ir::Value;
+    Ok(match value {
+        Value::Reference { base, path } => {
+            if let Some(var) = doc.variables.iter().find(|v| &v.name == base) {
+                anyhow::ensure!(
+                    path.is_empty(),
+                    "variable `{base}` cannot be indexed in an output"
+                );
+                return var
+                    .default
+                    .clone()
+                    .with_context(|| format!("variable `{base}` has no default value"));
+            }
+            let res = doc
+                .resources
+                .iter()
+                .find(|r| &r.name == base)
+                .with_context(|| format!("output references unknown object `{base}`"))?;
+            let applied = state
+                .get(&res.id)
+                .with_context(|| format!("`{}` is not in state; run apply first", res.id))?;
+            let (first, rest) = path
+                .split_first()
+                .with_context(|| format!("reference `{base}` names no attribute"))?;
+            let mut cur = applied
+                .attributes
+                .get(first)
+                .cloned()
+                .with_context(|| format!("`{}` has no attribute `{first}`", res.id))?;
+            for key in rest {
+                cur = match cur {
+                    Value::Map(mut m) => m
+                        .remove(key)
+                        .with_context(|| format!("no key `{key}` in `{}`", res.id))?,
+                    _ => anyhow::bail!("cannot read `{key}` from a non-map value in `{}`", res.id),
+                };
+            }
+            cur
+        }
+        Value::List(items) => Value::List(
+            items
+                .iter()
+                .map(|v| resolve_output_value(v, doc, state))
+                .collect::<Result<_>>()?,
+        ),
+        Value::Map(m) => Value::Map(
+            m.iter()
+                .map(|(k, v)| Ok((k.clone(), resolve_output_value(v, doc, state)?)))
+                .collect::<Result<_>>()?,
+        ),
+        other => other.clone(),
+    })
+}
+
+/// Convert a resolved IR value to plain JSON (not the IR's tagged encoding).
+fn to_plain_json(value: &tpt_bastion_ir::Value) -> serde_json::Value {
+    use tpt_bastion_ir::Value;
+    match value {
+        Value::String(s) => serde_json::Value::String(s.clone()),
+        Value::Number(n) => serde_json::Number::from_f64(*n)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        Value::Bool(b) => serde_json::Value::Bool(*b),
+        Value::Null | Value::Reference { .. } => serde_json::Value::Null,
+        Value::List(items) => serde_json::Value::Array(items.iter().map(to_plain_json).collect()),
+        Value::Map(m) => serde_json::Value::Object(
+            m.iter()
+                .map(|(k, v)| (k.clone(), to_plain_json(v)))
+                .collect(),
+        ),
+    }
+}
+
+/// Render a resolved value for plain output: strings unquoted, everything
+/// else as compact JSON.
+fn render_plain(value: &tpt_bastion_ir::Value) -> String {
+    match value {
+        tpt_bastion_ir::Value::String(s) => s.clone(),
+        other => to_plain_json(other).to_string(),
+    }
+}
+
+/// `bastion output`: resolve each output against the recorded state.
+fn cmd_output(
+    file: &PathBuf,
+    state_path: &PathBuf,
+    passphrase_env: Option<&str>,
+    name: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let source = read_source(file)?;
+    let doc = compile_source(&source).map_err(|e| anyhow::anyhow!("compile failed: {e}"))?;
+    let backend = build_backend(state_path, passphrase_env)?;
+    let state = load_prior(&backend)?;
+
+    let selected: Vec<_> = doc
+        .outputs
+        .iter()
+        .filter(|o| match name {
+            Some(n) => o.name == n,
+            None => true,
+        })
+        .collect();
+    if let Some(n) = name {
+        anyhow::ensure!(!selected.is_empty(), "no output named `{n}`");
+    }
+
+    let mut resolved = std::collections::BTreeMap::new();
+    for output in selected {
+        let value = resolve_output_value(&output.value, &doc, &state)
+            .with_context(|| format!("resolving output `{}`", output.name))?;
+        resolved.insert(output.name.clone(), value);
+    }
+
+    if json {
+        let obj: serde_json::Map<String, serde_json::Value> = resolved
+            .iter()
+            .map(|(k, v)| (k.clone(), to_plain_json(v)))
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&obj)?);
+    } else if name.is_some() {
+        // A single named output prints just its value, for scripting.
+        for value in resolved.values() {
+            println!("{}", render_plain(value));
+        }
+    } else {
+        for (key, value) in &resolved {
+            println!("{key} = {}", render_plain(value));
+        }
+    }
+    Ok(())
+}
+
+/// Whether a directory accepts new files (probed with a temporary file).
+fn dir_writable(dir: &std::path::Path) -> bool {
+    let probe = dir.join(format!(".bastion-doctor-{}", std::process::id()));
+    let ok = std::fs::write(&probe, b"").is_ok();
+    let _ = std::fs::remove_file(&probe);
+    ok
+}
+
+/// `bastion doctor`: run environment, document, and state checks. Prints one
+/// line per check and fails if any check fails.
+fn cmd_doctor(
+    file: Option<&PathBuf>,
+    state_path: Option<&PathBuf>,
+    passphrase_env: Option<&str>,
+) -> Result<()> {
+    let mut failures = 0usize;
+    let mut report = |ok: bool, label: &str, detail: String| {
+        let tag = if ok { "ok  " } else { "FAIL" };
+        println!("[{tag}] {label}: {detail}");
+        if !ok {
+            failures += 1;
+        }
+    };
+
+    report(
+        true,
+        "version",
+        format!("bastion {}", env!("CARGO_PKG_VERSION")),
+    );
+    report(
+        true,
+        "platform",
+        format!("{} / {}", std::env::consts::OS, std::env::consts::ARCH),
+    );
+    let ir_ok = tpt_bastion_ir::is_compatible(tpt_bastion_ir::IR_VERSION);
+    report(
+        ir_ok,
+        "IR format",
+        format!("version {}", tpt_bastion_ir::IR_VERSION),
+    );
+    let tmp = std::env::temp_dir();
+    report(
+        dir_writable(&tmp),
+        "temp directory",
+        format!("{} writable", tmp.display()),
+    );
+
+    if let Some(file) = file {
+        match read_source(file).and_then(|src| {
+            compile_source(&src).map_err(|e| anyhow::anyhow!("compile failed: {e}"))
+        }) {
+            Ok(doc) => {
+                report(true, "document", format!("{} compiles", file.display()));
+                match tpt_bastion_engine::DepGraph::build(&doc).and_then(|g| g.order().map(|_| ()))
+                {
+                    Ok(()) => report(
+                        true,
+                        "dependency graph",
+                        "acyclic, all references known".into(),
+                    ),
+                    Err(e) => report(false, "dependency graph", e.to_string()),
+                }
+            }
+            Err(e) => report(false, "document", format!("{e:#}")),
+        }
+    }
+
+    if let Some(state_path) = state_path {
+        let dir = match state_path.parent() {
+            Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+            _ => PathBuf::from("."),
+        };
+        let dir_ok = dir.is_dir() && dir_writable(&dir);
+        report(
+            dir_ok,
+            "state directory",
+            if !dir.is_dir() {
+                format!("{} does not exist", dir.display())
+            } else {
+                format!("{} writable (needed for locking)", dir.display())
+            },
+        );
+        let env_ok = match passphrase_env {
+            Some(v) => std::env::var(v).is_ok(),
+            None => true,
+        };
+        report(
+            env_ok,
+            "passphrase",
+            match passphrase_env {
+                Some(v) if env_ok => format!("${v} is set"),
+                Some(v) => format!("${v} is not set"),
+                None => "not required (plaintext state)".into(),
+            },
+        );
+        if env_ok {
+            match build_backend(state_path, passphrase_env).and_then(|b| load_prior(&b)) {
+                Ok(state) => report(
+                    true,
+                    "state",
+                    format!(
+                        "{} readable, {} resource(s)",
+                        state_path.display(),
+                        state.resources.len()
+                    ),
+                ),
+                Err(e) => report(false, "state", format!("{e:#}")),
+            }
+        }
+    }
+
+    if failures > 0 {
+        anyhow::bail!("{failures} check(s) failed");
+    }
+    println!("all checks passed");
+    Ok(())
+}
+
+/// `bastion fmt`: format documents in place, or check them with `--check`.
+///
+/// A file is never written unless the formatted text compiles to the same IR
+/// as the original. Formatting changes layout only, so a mismatch means a bug
+/// in the formatter; the file is left alone and the error is reported.
+fn cmd_fmt(files: &[PathBuf], check: bool) -> Result<()> {
+    anyhow::ensure!(
+        !files.is_empty(),
+        "no input given; pass one or more .bcl files, or `-` for stdin"
+    );
+
+    let mut would_change = 0usize;
+    for file in files {
+        let stdin_mode = file.as_os_str() == "-";
+        let original = read_source(file)?;
+        let formatted = tpt_bastion_dsl::format::format_source(&original);
+
+        // Layout must not change meaning. Compare IR when the original compiles.
+        if let Ok(before) = compile_source(&original) {
+            let after = compile_source(&formatted).map_err(|e| {
+                anyhow::anyhow!("{}: formatted output does not compile: {e}", file.display())
+            })?;
+            anyhow::ensure!(
+                before == after,
+                "{}: formatting changed the compiled IR; file left unchanged",
+                file.display()
+            );
+        }
+
+        if stdin_mode {
+            anyhow::ensure!(!check, "--check cannot be used with stdin");
+            print!("{formatted}");
+            continue;
+        }
+        if formatted == original.replace("\r\n", "\n") {
+            continue;
+        }
+        if check {
+            println!("would reformat {}", file.display());
+            would_change += 1;
+        } else {
+            std::fs::write(file, &formatted)
+                .with_context(|| format!("writing {}", file.display()))?;
+            println!("formatted {}", file.display());
+        }
+    }
+
+    if check && would_change > 0 {
+        anyhow::bail!("{would_change} file(s) need formatting");
+    }
+    Ok(())
+}
+
+/// Starter document written by `bastion init`.
+const STARTER_BCL: &str = r#"// SPDX-License-Identifier: Apache-2.0 OR MIT
+// Starter Bastion document. See `bastion validate` and `bastion plan`.
+
+config {
+    name = "my-project"
+}
+
+resource aws_s3_bucket main {
+    bucket = "my-project-bucket"
+    acl = "private"
+}
+
+output bucket_name {
+    value = main.bucket
+}
+"#;
+
+/// `bastion init`: write a starter `main.bcl`, refusing to overwrite one.
+fn cmd_init(dir: &std::path::Path) -> Result<()> {
+    std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    let target = dir.join("main.bcl");
+    if target.exists() {
+        anyhow::bail!("{} already exists; not overwriting", target.display());
+    }
+    std::fs::write(&target, STARTER_BCL)
+        .with_context(|| format!("writing {}", target.display()))?;
+    println!("created {}", target.display());
+    println!("next: bastion validate {}", target.display());
+    Ok(())
 }
 
 fn read_source(file: &PathBuf) -> Result<String> {
@@ -446,7 +985,50 @@ fn cmd_compile(file: &PathBuf, format: Format) -> Result<()> {
     Ok(())
 }
 
-fn cmd_plan(file: &PathBuf, state: Option<&PathBuf>, passphrase_env: Option<&str>) -> Result<()> {
+/// Machine-readable form of a plan for `bastion plan --json`.
+fn plan_to_json(plan: &tpt_bastion_engine::Plan, prior_count: usize) -> serde_json::Value {
+    let actions: Vec<serde_json::Value> = plan
+        .actions
+        .iter()
+        .map(|a| {
+            let changes: Vec<serde_json::Value> = a
+                .changes
+                .iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "name": c.name,
+                        "before": c.before.as_ref().map(to_plain_json),
+                        "after": c.after.as_ref().map(to_plain_json),
+                        "known_after_apply": c.known_after_apply,
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "action": a.kind.verb(),
+                "id": a.id,
+                "type": a.type_name,
+                "changes": changes,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "actions": actions,
+        "summary": {
+            "create": plan.to_create,
+            "update": plan.to_update,
+            "delete": plan.to_delete,
+            "unchanged": plan.unchanged,
+        },
+        "prior_resources": prior_count,
+    })
+}
+
+fn cmd_plan(
+    file: &PathBuf,
+    state: Option<&PathBuf>,
+    passphrase_env: Option<&str>,
+    json: bool,
+) -> Result<()> {
     let source = read_source(file)?;
 
     let doc = compile_source(&source).map_err(|e| anyhow::anyhow!("compile failed: {e}"))?;
@@ -461,7 +1043,12 @@ fn cmd_plan(file: &PathBuf, state: Option<&PathBuf>, passphrase_env: Option<&str
     let plan =
         plan_document_with_state(&doc, &prior).map_err(|e| anyhow::anyhow!("plan failed: {e}"))?;
 
-    println!("{}", plan.render());
+    if json {
+        let value = plan_to_json(&plan, prior.resources.len());
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        return Ok(());
+    }
+    println!("{}", render_plan(&plan));
     if prior.resources.is_empty() {
         println!("Note: no prior state; every resource plans as a create.");
     } else {
@@ -493,7 +1080,7 @@ fn cmd_apply(
     let plan = plan_document_with_state(&doc, &prior_eng)
         .map_err(|e| anyhow::anyhow!("plan failed: {e}"))?;
 
-    println!("{}", plan.render());
+    println!("{}", render_plan(&plan));
 
     if !auto_approve {
         anyhow::bail!(
@@ -653,4 +1240,16 @@ fn cmd_provider(action: &ProviderAction) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Plan text for the terminal: colored only when stdout is a terminal and
+/// `NO_COLOR` is unset, so piped output stays plain.
+fn render_plan(plan: &tpt_bastion_engine::Plan) -> String {
+    use std::io::IsTerminal;
+    let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+    if color {
+        plan.render_colored()
+    } else {
+        plan.render()
+    }
 }

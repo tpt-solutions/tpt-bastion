@@ -2,14 +2,21 @@
 
 The `bastion` command-line tool for [TPT Bastion][bastion].
 
-The initial CLI compiles `.bcl` documents to the Bastion IR:
+The CLI compiles `.bcl` documents to the Bastion IR and runs the pipeline on
+them:
 
 ```sh
 cargo run --bin bastion -- compile examples/aws_s3.bcl
+cargo run --bin bastion -- validate examples/aws_s3.bcl
+cargo run --bin bastion -- plan examples/aws_s3.bcl --json
 ```
 
-`plan`, `apply`, and `state` subcommands will be added here as the execution
-engine and state backends land.
+Subcommands: `compile`, `validate`, `graph`, `plan` (`--json`), `apply`,
+`state`, `drift`, `output`, `provider`, `events`, `ui`, `init`, `doctor`, and
+`completions`. Run `bastion <subcommand> --help` for details.
+
+`apply` uses an in-memory mock provider. It does not change real infrastructure
+yet. See [`docs/status.md`](../../docs/status.md).
 
 See the workspace [README](../../README.md) for the project overview.
 

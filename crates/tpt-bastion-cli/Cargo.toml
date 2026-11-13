@@ -20,13 +20,14 @@ name = "bastion"
 path = "src/main.rs"
 
 [dependencies]
-tpt-bastion-dsl = { path = "../tpt-bastion-dsl" }
-tpt-bastion-ir = { path = "../tpt-bastion-ir" }
-tpt-bastion-engine = { path = "../tpt-bastion-engine" }
-tpt-bastion-state = { path = "../tpt-bastion-state" }
-tpt-bastion-providers = { path = "../tpt-bastion-providers" }
-tpt-bastion-events = { path = "../tpt-bastion-events" }
-tpt-bastion-ui = { path = "../tpt-bastion-ui" }
+tpt-bastion-dsl = { path = "../tpt-bastion-dsl", version = "0.1.0" }
+tpt-bastion-ir = { path = "../tpt-bastion-ir", version = "0.1.0" }
+tpt-bastion-engine = { path = "../tpt-bastion-engine", version = "0.1.0" }
+tpt-bastion-state = { path = "../tpt-bastion-state", version = "0.1.0" }
+tpt-bastion-providers = { path = "../tpt-bastion-providers", version = "0.1.0" }
+tpt-bastion-events = { path = "../tpt-bastion-events", version = "0.1.0" }
+tpt-bastion-ui = { path = "../tpt-bastion-ui", version = "0.1.0" }
 clap.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
+clap_complete = "4.6"
