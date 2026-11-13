@@ -1,0 +1,24 @@
+{
+    "_comment": "SPDX-License-Identifier: Apache-2.0 OR MIT. Scoop manifest template. Fill in version and hash for each release, then add to a bucket.",
+    "version": "@VERSION@",
+    "description": "Next-generation Infrastructure-as-Code platform",
+    "homepage": "https://bastion.tpt.dev",
+    "license": "Apache-2.0 OR MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/tpt/bastion/releases/download/v@VERSION@/bastion-v@VERSION@-x86_64-pc-windows-msvc.zip",
+            "hash": "@SHA256_X64_MSVC@"
+        }
+    },
+    "bin": "bastion.exe",
+    "checkver": {
+        "github": "https://github.com/tpt/bastion"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/tpt/bastion/releases/download/v$version/bastion-v$version-x86_64-pc-windows-msvc.zip"
+            }
+        }
+    }
+}

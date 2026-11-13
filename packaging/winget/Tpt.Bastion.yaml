@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+#
+# winget manifest template (singleton, version 1.6.0 schema).
+# Placeholders in @NAME@ form are filled in for each release. Submit the rendered
+# manifest to microsoft/winget-pkgs; this file is not published by CI yet.
+PackageIdentifier: Tpt.Bastion
+PackageVersion: "@VERSION@"
+PackageLocale: en-US
+Publisher: TPT
+PublisherUrl: https://github.com/tpt/bastion
+PackageName: TPT Bastion
+PackageUrl: https://bastion.tpt.dev
+License: Apache-2.0 OR MIT
+ShortDescription: Next-generation Infrastructure-as-Code platform
+Installers:
+  - Architecture: x64
+    InstallerType: zip
+    InstallerUrl: https://github.com/tpt/bastion/releases/download/@TAG@/bastion-@TAG@-x86_64-pc-windows-msvc.zip
+    InstallerSha256: "@SHA256_X64_MSVC@"
+    NestedInstallerType: portable
+    NestedInstallerFiles:
+      - RelativeFilePath: bastion.exe
+        PortableCommandAlias: bastion
+ManifestType: singleton
+ManifestVersion: 1.6.0

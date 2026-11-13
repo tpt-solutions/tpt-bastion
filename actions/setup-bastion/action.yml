@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+#
+# Install the bastion CLI from a GitHub release for the job's runner. The
+# installer scripts verify the archive against the release's SHA256SUMS before
+# installing, so a tampered download fails the step.
+#
+# Usage:
+#   - uses: tpt/bastion/actions/setup-bastion@master
+#     with:
+#       version: v0.1.0   # default: latest release
+name: setup-bastion
+description: Install the bastion CLI from a GitHub release, verifying SHA256SUMS
+inputs:
+  version:
+    description: Release tag to install, such as v0.1.0. Defaults to the latest release.
+    required: false
+    default: latest
+runs:
+  using: composite
+  steps:
+    - name: Install on Linux or macOS
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        INSTALL_DIR: ${{ runner.temp }}/bastion/bin
+      run: |
+        set -euo pipefail
+        if [ "$VERSION" = "latest" ]; then
+          sh "${{ github.action_path }}/../../scripts/install.sh" --to "$INSTALL_DIR"
+        else
+          sh "${{ github.action_path }}/../../scripts/install.sh" --version "$VERSION" --to "$INSTALL_DIR"
+        fi
+        echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+
+    - name: Install on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        VERSION: ${{ inputs.version }}
+        INSTALL_DIR: ${{ runner.temp }}\bastion\bin
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $args = @{ To = $env:INSTALL_DIR }
+        if ($env:VERSION -ne 'latest') { $args['Version'] = $env:VERSION }
+        & "${{ github.action_path }}\..\..\scripts\install.ps1" @args
+        Add-Content -Path $env:GITHUB_PATH -Value $env:INSTALL_DIR
+
+    - name: Check the installed version
+      shell: bash
+      run: bastion --version

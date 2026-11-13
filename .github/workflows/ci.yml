@@ -12,8 +12,12 @@ env:
 
 jobs:
   build-and-test:
-    name: Build & Test
-    runs-on: ubuntu-latest
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
@@ -74,6 +78,53 @@ jobs:
           tool: cargo-deny
       - name: Check production dependency licenses (no Apache-2.0-only)
         run: cargo deny check licenses
+      - name: Check dependencies against the RustSec advisory database
+        run: cargo deny check advisories
+
+  msrv:
+    name: Minimum supported Rust (1.74)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust 1.74
+        uses: dtolnay/rust-toolchain@1.74
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the workspace with the declared MSRV
+        run: cargo build --workspace
+
+  vscode-extension:
+    name: VS Code extension (build and package)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: npm ci
+      - name: Compile TypeScript
+        run: npm run build
+      - name: Package the .vsix
+        run: npx vsce package -o bastion-vscode.vsix
+      - name: Upload the .vsix
+        uses: actions/upload-artifact@v4
+        with:
+          name: bastion-vscode
+          path: editors/vscode/bastion-vscode.vsix
+
+  docker-smoke:
+    name: Docker image smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t bastion:ci .
+      - name: Run the CLI from the image
+        run: docker run --rm bastion:ci --version
 
   docs:
     name: Docs site build
