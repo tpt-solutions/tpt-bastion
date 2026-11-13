@@ -38,24 +38,24 @@ Next-generation Infrastructure-as-Code platform in Rust. Tracks all phases from 
 - [x] Design encrypted state file format
 - [x] Implement state versioning/history
 - [x] Implement state locking/concurrency control
-- [x] Implement real-time drift detection
-- [x] Implement automatic drift reconciliation
+- [ ] Implement real-time drift detection (plan-time only; no live refresh, see docs/status.md)
+- [ ] Implement automatic drift reconciliation (reconcile plans exist; apply runs the mock provider)
 - [x] Design pluggable interface for future external state backends (e.g. TPT Keystone)
 
 ## Phase 5 — Provider Plugin System
-- [x] Design Wasm-based plugin host/runtime
+- [ ] Design Wasm-based plugin host/runtime (superseded by the subprocess ABI; no Wasm host)
 - [x] Define provider SDK/ABI (resource CRUD, data sources, schema)
-- [x] Implement provider process isolation/sandboxing
+- [ ] Implement provider process isolation/sandboxing (Linux landlock path lacks a passing runtime test)
 - [x] Define provider capability/schema format
 - [x] Build provider scaffolding/starter template
 - [x] Write provider development guide
 
 ## Phase 6 — Cloud & Platform Providers (parallel tracks)
-- [x] AWS provider (core resource coverage)
-- [x] GCP provider (core resource coverage)
-- [x] Azure provider (core resource coverage)
-- [x] Kubernetes provider (core resource coverage)
-- [x] Terraform-compatible provider shim (interop with existing TF providers)
+- [ ] AWS provider (core resource coverage) — stub: no SDK calls (11.3)
+- [ ] GCP provider (core resource coverage) — stub: no SDK calls (11.3)
+- [ ] Azure provider (core resource coverage) — stub: no SDK calls (11.3)
+- [ ] Kubernetes provider (core resource coverage) — stub: no API calls (11.3)
+- [ ] Terraform-compatible provider shim (interop with existing TF providers) — experimental; real runs unverified
 
 ## Phase 7 — Event-Driven Updates
 - [x] Design internal event source/trigger interface
@@ -74,7 +74,7 @@ Next-generation Infrastructure-as-Code platform in Rust. Tracks all phases from 
 - [x] Prepare crates.io metadata for each publishable crate (description, keywords, categories, docs.rs config)
 - [x] Set up `cargo publish` release automation
 - [x] Build cross-platform CLI binaries
-- [x] Publish install script and package manager entries (Homebrew, cargo install, etc.)
+- [ ] Publish install script and package manager entries (Homebrew, cargo install, etc.) — Homebrew sha256 still placeholder (11.7)
 - [x] Build and publish Docker image
 - [x] Automate versioned GitHub releases with changelogs
 
@@ -90,16 +90,16 @@ Next-generation Infrastructure-as-Code platform in Rust. Tracks all phases from 
 Findings from the project review. Several earlier `[x]` items above are overstated (real apply, cloud providers, Wasm host, live drift, install/brew entries); these tasks close the gaps.
 
 ### 11.1 Correctness & security fixes
-- [ ] Events webhook + UI: compare secret/token with original case (only lowercase header names); fix webhook POST response; remove dead `header_len`
-- [ ] UI: add Origin/Host (CSRF) check on POST `/api/apply`; show file label from `/api/info`
+- [x] Events webhook + UI: compare secret/token with original case (only lowercase header names); fix webhook POST response; remove dead `header_len`
+- [x] UI: add Origin/Host (CSRF) check on POST `/api/apply`; show file label from `/api/info`
 - [ ] Sandbox: make landlock policy actually read-only outside allowed paths; stop swallowing errors; document Windows/macOS limits
 - [ ] terraform-shim: per-resource workdir, persist tfstate, make `delete` really destroy, serialize per dir
 - [ ] Commit `todo 1260715.md` → `history/` move; stop ignoring and commit `Cargo.lock`
 
 ### 11.2 Engine & provider plumbing
-- [ ] Extend `Provider` trait with `read` and `update`; add `ProviderRouter` (type prefix → provider)
+- [x] Extend `Provider` trait with `read` and `update`; add `ProviderRouter` (type prefix → provider)
 - [ ] Attribute-level plan diff (Create/Update/Replace/NoOp/Delete, "known after apply")
-- [ ] Executor: real update path, no-op for unchanged, rollback on delete failure, preserve untouched resources in state
+- [x] Executor: real update path, no-op for unchanged, rollback on delete failure, preserve untouched resources in state
 - [ ] `bastion apply` uses real providers (MockProvider only behind `--mock`); add `destroy` and `refresh`
 - [ ] Live drift detection via provider `read`
 - [ ] Provider config (region/credentials) from `config` block; `bastion events` accepts `--state`/passphrase
@@ -112,15 +112,15 @@ Findings from the project review. Several earlier `[x]` items above are overstat
 - [ ] Gated integration tests (kind, LocalStack, emulators) in a separate CI job
 
 ### 11.4 Core CLI adoption tooling
-- [ ] `bastion init` project scaffolding
-- [ ] `bastion validate`
-- [ ] `bastion fmt` (+ `--check`)
-- [ ] `bastion doctor`
-- [ ] `bastion completions` (bash/zsh/fish/powershell)
-- [ ] `bastion graph` (DOT/mermaid) and `bastion output`
+- [x] `bastion init` project scaffolding
+- [x] `bastion validate`
+- [x] `bastion fmt` (+ `--check`)
+- [x] `bastion doctor`
+- [x] `bastion completions` (bash/zsh/fish/powershell)
+- [x] `bastion graph` (DOT/mermaid) and `bastion output`
 - [ ] Colored plan diff, `--json` plan output, saved plan files (`--out`)
 - [ ] Source-span diagnostics with caret snippets and "did you mean" (incl. compile errors)
-- [ ] Compile-time reference validation
+- [x] Compile-time reference validation
 - [ ] DSL: `count`/`for_each` expansion, variable default/usage checks, module expansion
 - [ ] `plan --explain` (why each change happens)
 - [ ] Policy-as-code: `policy {}` rules evaluated at plan time
@@ -138,9 +138,9 @@ Findings from the project review. Several earlier `[x]` items above are overstat
 - [ ] `bastion provider schema <name> --json` and generated provider docs
 
 ### 11.7 Release & install pipeline
-- [ ] Consistent release asset names; fix `install.sh` / `install.ps1` 404s
+- [x] Consistent release asset names; fix `install.sh` / `install.ps1` 404s
 - [ ] Publish `SHA256SUMS` + signatures; verify checksums in install scripts; musl detection
-- [ ] Fix `cargo publish` order (add `bastion-events`, `bastion-ui`), remove `|| true` / `--no-verify`
+- [x] Fix `cargo publish` order (add `bastion-events`, `bastion-ui`), remove `|| true` / `--no-verify`
 - [ ] Homebrew formula: real sha256 (auto-bump in release workflow); winget/scoop manifests
 - [ ] `setup-bastion` GitHub Action; Docker image smoke test in CI
 - [ ] CI: Windows/macOS test matrix, MSRV, cargo-deny/audit
@@ -148,6 +148,6 @@ Findings from the project review. Several earlier `[x]` items above are overstat
 
 ### 11.8 Docs honesty
 - [ ] Rewrite `CLAUDE.md`, `README.md` crate table/layout, crate and provider READMEs to match reality
-- [ ] Replace "Wasm" claims with "sandboxed subprocess provider ABI" (or build the Wasm host)
-- [ ] Remove "real-time drift" wording until live refresh ships; add provider/resource status matrix
-- [ ] Correct over-checked items in Phases 3–6 and 9
+- [x] Replace "Wasm" claims with "sandboxed subprocess provider ABI" (or build the Wasm host)
+- [x] Remove "real-time drift" wording until live refresh ships; add provider/resource status matrix
+- [x] Correct over-checked items in Phases 3–6 and 9
