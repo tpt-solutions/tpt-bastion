@@ -12,12 +12,11 @@ use serde_json::{json, Value as Json};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tpt_bastion_dsl::compile_source;
-use tpt_bastion_engine::{plan_document_with_state, EngineState};
+use tpt_bastion_engine::{plan_document_with_state, State as EngineState};
 use tpt_bastion_ir::Value;
 use tpt_bastion_providers::{NativeRuntime, NullProvider, PluginRegistry};
-use tpt_bastion_state::{
-    backend::StateBackend, detect_drift, file::FileStateBackend, State as BastionState,
-};
+use tpt_bastion_state::drift::{detect_drift, DriftKind, DriftReport};
+use tpt_bastion_state::{backend::StateBackend, file::FileStateBackend, State as BastionState};
 
 /// Read the configured `.bcl` document's source text.
 fn read_source(file: &PathBuf) -> Result<String, String> {
@@ -63,7 +62,7 @@ pub fn plan(config: &UiConfig) -> Result<Json, String> {
     };
     let plan =
         plan_document_with_state(&doc, &prior_eng).map_err(|e| format!("plan failed: {e}"))?;
-    Ok(serde_json::to_value(PlanView::from(&plan)).map_err(|e| e.to_string())?)
+    serde_json::to_value(PlanView::from(&plan)).map_err(|e| e.to_string())
 }
 
 /// Load and return the recorded state.
@@ -98,7 +97,7 @@ pub fn drift(config: &UiConfig) -> Result<Json, String> {
         None => return Ok(json!({ "items": [], "note": "no state file configured" })),
     };
     let report = detect_drift(&doc, &recorded);
-    Ok(serde_json::to_value(DriftView::from(&report)).map_err(|e| e.to_string())?)
+    serde_json::to_value(DriftView::from(&report)).map_err(|e| e.to_string())
 }
 
 /// Names of providers registered in the default runtime.
@@ -193,21 +192,17 @@ struct DriftItemView {
     actual: Option<Value>,
 }
 
-impl From<&tpt_bastion_state::DriftReport> for DriftView {
-    fn from(r: &tpt_bastion_state::DriftReport) -> Self {
+impl From<&DriftReport> for DriftView {
+    fn from(r: &DriftReport) -> Self {
         DriftView {
             items: r
                 .items
                 .iter()
                 .map(|item| {
                     let (kind, attr, expected, actual) = match &item.kind {
-                        tpt_bastion_state::DriftKind::MissingResource => {
-                            ("missing".to_string(), None, None, None)
-                        }
-                        tpt_bastion_state::DriftKind::ExtraResource => {
-                            ("extra".to_string(), None, None, None)
-                        }
-                        tpt_bastion_state::DriftKind::AttributeDrift {
+                        DriftKind::MissingResource => ("missing".to_string(), None, None, None),
+                        DriftKind::ExtraResource => ("extra".to_string(), None, None, None),
+                        DriftKind::AttributeDrift {
                             attr,
                             expected,
                             actual,

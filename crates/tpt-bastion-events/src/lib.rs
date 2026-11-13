@@ -214,13 +214,16 @@ fn read_webhook(mut stream: TcpStream, secret: &Option<String>) -> Option<InfraE
     let mut content_length = 0usize;
     let mut presented_token: Option<String> = None;
     for line in lines {
-        let lower = line.to_ascii_lowercase();
-        if let Some(rest) = lower.strip_prefix("content-length:") {
-            content_length = rest.trim().parse().unwrap_or(0);
-        } else if let Some(rest) = lower.strip_prefix("x-bastion-token:") {
-            presented_token = Some(rest.trim().to_string());
-        } else if let Some(rest) = lower.strip_prefix("authorization: bearer ") {
-            presented_token = Some(rest.trim().to_string());
+        // Only the header *name* is case-insensitive; the value (the secret)
+        // keeps its original case.
+        if let Some(value) = header_value(line, "content-length") {
+            content_length = value.parse().unwrap_or(0);
+        } else if let Some(value) = header_value(line, "x-bastion-token") {
+            presented_token = Some(value.to_string());
+        } else if let Some(value) = header_value(line, "authorization") {
+            if let Some(token) = strip_bearer(value) {
+                presented_token = Some(token.to_string());
+            }
         }
     }
 
@@ -242,7 +245,6 @@ fn read_webhook(mut stream: TcpStream, secret: &Option<String>) -> Option<InfraE
         return None;
     }
 
-    let header_len = buf.len();
     let mut body = vec![0u8; content_length];
     let mut filled = 0;
     while filled < content_length {
@@ -252,19 +254,39 @@ fn read_webhook(mut stream: TcpStream, secret: &Option<String>) -> Option<InfraE
             Err(_) => break,
         }
     }
-    let _ = header_len;
-
-    let _ = stream.shutdown(Shutdown::Both);
-
     if method.eq_ignore_ascii_case("POST") {
+        let _ = stream.write_all(b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n");
+        let _ = stream.shutdown(Shutdown::Both);
         Some(InfraEvent::Webhook {
             method,
             path,
             body: String::from_utf8_lossy(&body[..filled]).into_owned(),
         })
     } else {
-        // Acknowledge other methods without producing an event.
-        let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+        // Non-POST requests produce no event.
+        let _ = stream.write_all(b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n");
+        let _ = stream.shutdown(Shutdown::Both);
+        None
+    }
+}
+
+/// Return the value of `line` if its header name matches `name`
+/// (ASCII case-insensitive). The value keeps its original case.
+fn header_value<'a>(line: &'a str, name: &str) -> Option<&'a str> {
+    let (key, value) = line.split_once(':')?;
+    if key.trim().eq_ignore_ascii_case(name) {
+        Some(value.trim())
+    } else {
+        None
+    }
+}
+
+/// Strip a case-insensitive `Bearer ` scheme prefix from an Authorization value.
+fn strip_bearer(value: &str) -> Option<&str> {
+    let scheme = value.get(..7)?;
+    if scheme.eq_ignore_ascii_case("bearer ") {
+        Some(value[7..].trim())
+    } else {
         None
     }
 }
@@ -392,11 +414,14 @@ mod tests {
             let _ = stream.read(&mut buf);
         });
 
-        let mut source = source;
-        let event = source.next_event();
+        // The server writes its 401 before deciding not to emit, so once the
+        // client has observed the response no event can still arrive. Check
+        // the channel without blocking (a blocking recv would hang forever).
+        let source = source;
         client.join().unwrap();
         assert_eq!(
-            event, None,
+            source.rx.try_recv().ok(),
+            None,
             "unauthenticated webhook must not produce an event"
         );
     }
@@ -414,10 +439,13 @@ mod tests {
             let _ = stream.read(&mut buf);
         });
 
-        let mut source = source;
-        let event = source.next_event();
+        let source = source;
         client.join().unwrap();
-        assert_eq!(event, None, "oversized body must be rejected");
+        assert_eq!(
+            source.rx.try_recv().ok(),
+            None,
+            "oversized body must be rejected"
+        );
     }
 
     #[test]

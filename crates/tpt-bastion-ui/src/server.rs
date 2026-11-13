@@ -66,14 +66,29 @@ fn handle(mut stream: std::net::TcpStream, config: &UiConfig) -> std::io::Result
     let method = parts.next().unwrap_or("");
     let path = parts.next().unwrap_or("/").to_string();
 
-    // Collect auth header for API protection.
+    // Collect headers. Names are case-insensitive; values (tokens, origins)
+    // keep their original case.
     let mut presented: Option<String> = None;
+    let mut host: Option<String> = None;
+    let mut origin: Option<String> = None;
     for line in lines {
-        let lower = line.to_ascii_lowercase();
-        if let Some(rest) = lower.strip_prefix("authorization: bearer ") {
-            presented = Some(rest.trim().to_string());
-        } else if let Some(rest) = lower.strip_prefix("x-bastion-token:") {
-            presented = Some(rest.trim().to_string());
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        let (name, value) = (name.trim(), value.trim());
+        if name.eq_ignore_ascii_case("x-bastion-token") {
+            presented = Some(value.to_string());
+        } else if name.eq_ignore_ascii_case("authorization") {
+            let is_bearer = value
+                .get(..7)
+                .is_some_and(|s| s.eq_ignore_ascii_case("bearer "));
+            if is_bearer {
+                presented = Some(value[7..].trim().to_string());
+            }
+        } else if name.eq_ignore_ascii_case("host") {
+            host = Some(value.to_string());
+        } else if name.eq_ignore_ascii_case("origin") {
+            origin = Some(value.to_string());
         }
     }
 
@@ -95,6 +110,17 @@ fn handle(mut stream: std::net::TcpStream, config: &UiConfig) -> std::io::Result
         }
     }
 
+    // CSRF guard for the mutating endpoint: a browser on another site cannot
+    // set a matching Host, and sends a foreign Origin. Reject both.
+    if method == "POST" && !origin_is_local(host.as_deref(), origin.as_deref(), config.port) {
+        return respond(
+            &mut stream,
+            403,
+            "application/json",
+            b"{\"error\":\"cross-origin request rejected\"}",
+        );
+    }
+
     match (method, path.as_str()) {
         ("GET", "/") | ("GET", "/index.html") => respond(
             &mut stream,
@@ -102,7 +128,7 @@ fn handle(mut stream: std::net::TcpStream, config: &UiConfig) -> std::io::Result
             "text/html; charset=utf-8",
             INDEX_HTML.as_bytes(),
         ),
-        ("GET", "/api/info") => json(stream, api::info(config)),
+        ("GET", "/api/info") => json(stream, Ok(api::info(config))),
         ("GET", "/api/compile") => json(stream, api::compile(config)),
         ("GET", "/api/plan") => json(stream, api::plan(config)),
         ("GET", "/api/state") => json(stream, api::state(config)),
@@ -195,6 +221,25 @@ fn respond(
     stream.write_all(body)?;
     stream.flush()?;
     Ok(())
+}
+
+/// Whether a request's Host and (optional) Origin point at this dashboard.
+///
+/// Host must be the loopback address on our port. If an Origin header is
+/// present it must be the same loopback origin; a missing Origin (non-browser
+/// clients such as curl) is allowed.
+fn origin_is_local(host: Option<&str>, origin: Option<&str>, port: u16) -> bool {
+    let local_hosts = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
+    let Some(host) = host else { return false };
+    if !local_hosts.iter().any(|h| h.eq_ignore_ascii_case(host)) {
+        return false;
+    }
+    match origin {
+        None => true,
+        Some(o) => local_hosts
+            .iter()
+            .any(|h| o.eq_ignore_ascii_case(&format!("http://{h}"))),
+    }
 }
 
 /// Constant-time comparison to avoid leaking the token via timing.

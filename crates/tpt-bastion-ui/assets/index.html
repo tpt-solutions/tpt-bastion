@@ -169,13 +169,17 @@ document.getElementById('applyBtn').onclick = async () => {
 };
 
 (async () => {
-  document.getElementById('fileLabel').textContent = location.search.replace('?', '') || 'no file';
-  // Probe whether apply is enabled.
+  // Probe whether apply is enabled and which file this dashboard serves.
   try {
     const info = await api.get('/api/info');
+    const name = String(info.file || '').split(/[\\/]/).pop();
+    document.getElementById('fileLabel').textContent = name || 'no file';
     document.getElementById('mode').textContent = info.allow_apply ? 'apply enabled' : 'read-only';
     document.getElementById('applyBtn').disabled = !info.allow_apply;
-  } catch (e) { /* token may be required */ }
+  } catch (e) {
+    document.getElementById('fileLabel').textContent = 'no file';
+    /* token may be required */
+  }
   refresh('compile');
 })();
 </script>

@@ -21,8 +21,6 @@ use rand::RngCore;
 use sha2::Sha256;
 
 /// Length in bytes of the per-file salt feeding Argon2id.
-
-/// Length in bytes of the per-file salt feeding Argon2id.
 pub const SALT_LEN: usize = 16;
 
 /// Length in bytes of the AES-GCM nonce (96 bits, as required by the cipher).
