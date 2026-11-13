@@ -58,6 +58,10 @@ pub struct Document {
     /// Output values.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<Output>,
+
+    /// Plan-time policy rules. Documents from older IR writers have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policies: Vec<Policy>,
 }
 
 /// Top-level configuration (project metadata, default region, etc.).
@@ -112,6 +116,41 @@ pub struct Module {
 
     /// Inputs passed to the module.
     pub attributes: BTreeMap<String, Value>,
+}
+
+/// A plan-time rule about one attribute of resources of one type.
+///
+/// The rule is checked against the attributes the document declares. A reference
+/// whose value is only known after apply cannot be checked, so it passes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Policy {
+    /// The policy's name, used in violation messages.
+    pub name: String,
+    /// The resource type the rule applies to, such as `aws_s3_bucket`.
+    pub resource_type: String,
+    /// The attribute the rule checks.
+    pub attribute: String,
+    /// What the attribute must or must not be.
+    pub rule: PolicyRule,
+    /// Shown with a violation, to explain the rule to the user.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// What a [`Policy`] requires of its attribute.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PolicyRule {
+    /// The attribute must not equal `value`.
+    Forbid {
+        /// The value that is not allowed.
+        value: Value,
+    },
+    /// The attribute must equal `value`.
+    Require {
+        /// The value that is required.
+        value: Value,
+    },
 }
 
 /// A named output value.
@@ -181,6 +220,7 @@ pub fn empty_document() -> Document {
         resources: Vec::new(),
         modules: Vec::new(),
         outputs: Vec::new(),
+        policies: Vec::new(),
     }
 }
 
@@ -238,6 +278,7 @@ mod tests {
             }],
             modules: vec![],
             outputs: vec![],
+            policies: vec![],
         };
         let json = serde_json::to_string_pretty(&doc).unwrap();
         assert!(json.contains("aws_s3_bucket.demo"));
