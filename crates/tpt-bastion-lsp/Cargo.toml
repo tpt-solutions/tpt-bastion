@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+[package]
+name = "tpt-bastion-lsp"
+description = "Language Server Protocol server for Bastion .bcl files: diagnostics, formatting, hover, go-to-definition, and completion"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["lsp", "iac", "editor", "infrastructure", "language-server"]
+categories = ["development-tools"]
+documentation = "https://docs.rs/tpt-bastion-lsp"
+readme = "README.md"
+
+[dependencies]
+tpt-bastion-dsl = { path = "../tpt-bastion-dsl", version = "0.1.0" }
+tpt-bastion-providers = { path = "../tpt-bastion-providers", version = "0.1.0" }
+serde_json.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+cargo-arg = "--all-features"

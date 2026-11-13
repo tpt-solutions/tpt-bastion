@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+[package]
+name = "tpt-bastion-import"
+description = "Migrate Terraform and OpenTofu configuration and state to TPT Bastion, reporting every construct it cannot convert"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["terraform", "migration", "iac", "hcl", "infrastructure"]
+categories = ["development-tools"]
+documentation = "https://docs.rs/tpt-bastion-import"
+readme = "README.md"
+
+[dependencies]
+tpt-bastion-dsl = { path = "../tpt-bastion-dsl", version = "0.1.0" }
+tpt-bastion-engine = { path = "../tpt-bastion-engine", version = "0.1.0" }
+tpt-bastion-ir = { path = "../tpt-bastion-ir", version = "0.1.0" }
+serde_json.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+cargo-arg = "--all-features"
