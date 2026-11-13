@@ -20,7 +20,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tpt_bastion_dsl::compile_source;
 use tpt_bastion_engine::{
-    plan_document_with_state, Executor, MockProvider, PrintingHandler, State as EngineState,
+    plan_document_with_state, refresh_state, Executor, MockProvider, PrintingHandler,
+    State as EngineState,
 };
 use tpt_bastion_events::{run_forever, FileEventSource, WebhookEventSource};
 use tpt_bastion_providers::{NativeRuntime, NullProvider, PluginRegistry};
@@ -71,13 +72,26 @@ enum Command {
         /// Print the plan as a JSON object instead of text.
         #[arg(long)]
         json: bool,
+
+        /// Save the plan to a file that `apply --plan` can run later.
+        #[arg(long, value_name = "PATH")]
+        out: Option<PathBuf>,
+
+        /// Also print why each action is planned.
+        #[arg(long)]
+        explain: bool,
     },
 
     /// Apply an execution plan, creating/updating infrastructure.
     Apply {
         /// Path to the `.bcl` source file. Use `-` to read from stdin.
-        #[arg(value_name = "FILE")]
-        file: PathBuf,
+        #[arg(value_name = "FILE", required_unless_present = "plan")]
+        file: Option<PathBuf>,
+
+        /// Apply a plan saved with `plan --out` instead of planning now. Refused
+        /// if the state has changed since the plan was saved.
+        #[arg(long, value_name = "PATH", conflicts_with = "file")]
+        plan: Option<PathBuf>,
 
         /// State file to read prior state from and write the new state to.
         #[arg(long, value_name = "PATH")]
@@ -90,6 +104,32 @@ enum Command {
         /// Apply without an interactive confirmation prompt.
         #[arg(long)]
         auto_approve: bool,
+
+        /// Run against the in-memory mock provider. Apply refuses to run without
+        /// this flag, because no real provider is wired in yet and nothing would
+        /// be created. With `--mock`, only the state file changes.
+        #[arg(long)]
+        mock: bool,
+    },
+
+    /// Destroy every resource recorded in state, using the mock provider.
+    Destroy {
+        /// State file whose resources are destroyed.
+        #[arg(long, value_name = "PATH")]
+        state: PathBuf,
+
+        /// Environment variable holding the state encryption passphrase.
+        #[arg(long, value_name = "VAR")]
+        passphrase_env: Option<String>,
+
+        /// Destroy without an interactive confirmation prompt.
+        #[arg(long)]
+        auto_approve: bool,
+
+        /// Required. Destroy runs against the in-memory mock provider until real
+        /// providers are wired in.
+        #[arg(long)]
+        mock: bool,
     },
 
     /// Inspect and manage Bastion native state (Phase 4).
@@ -182,6 +222,17 @@ enum Command {
         format: GraphFormat,
     },
 
+    /// Re-read every recorded resource from its provider and update state to match.
+    Refresh {
+        /// State file to refresh.
+        #[arg(long, value_name = "PATH")]
+        state: PathBuf,
+
+        /// Environment variable holding the state encryption passphrase.
+        #[arg(long, value_name = "VAR")]
+        passphrase_env: Option<String>,
+    },
+
     /// Format `.bcl` files in canonical style (indentation, blank lines).
     Fmt {
         /// Files to format. Use `-` to read stdin and write stdout.
@@ -238,6 +289,15 @@ enum Command {
         passphrase_env: Option<String>,
     },
 
+    /// Run the language server on stdin/stdout (for editors).
+    Lsp,
+
+    /// Migrate Terraform or OpenTofu configuration and state to Bastion.
+    Import {
+        #[command(subcommand)]
+        what: ImportAction,
+    },
+
     /// Generate a shell completion script on stdout.
     Completions {
         /// Shell to generate completions for.
@@ -269,6 +329,15 @@ enum EventsAction {
         /// Run `apply --auto-approve` instead of `plan` on each event.
         #[arg(long)]
         apply: bool,
+
+        /// State file for each plan or apply. Defaults to `<FILE>.bclstate`
+        /// when applying, and to no state when planning.
+        #[arg(long, value_name = "PATH")]
+        state: Option<PathBuf>,
+
+        /// Environment variable holding the state encryption passphrase.
+        #[arg(long, value_name = "VAR")]
+        passphrase_env: Option<String>,
     },
     /// Accept webhook POSTs and re-plan/re-apply when they arrive.
     Webhook {
@@ -288,18 +357,82 @@ enum EventsAction {
         /// inbound request. Required when `--apply` is set (fail-closed).
         #[arg(long, value_name = "VAR")]
         secret_env: Option<String>,
+
+        /// State file for each plan or apply. Defaults to `<FILE>.bclstate`
+        /// when applying, and to no state when planning.
+        #[arg(long, value_name = "PATH")]
+        state: Option<PathBuf>,
+
+        /// Environment variable holding the state encryption passphrase.
+        #[arg(long, value_name = "VAR")]
+        passphrase_env: Option<String>,
+    },
+}
+
+/// What to import with the `import` subcommand.
+#[derive(Subcommand)]
+enum ImportAction {
+    /// Convert every `.tf` file in a directory to `.bcl`, reporting what was not converted.
+    Tf {
+        /// Directory containing the `.tf` files.
+        #[arg(value_name = "DIR")]
+        dir: PathBuf,
+
+        /// Where to write the `.bcl` files. Defaults to `<DIR>/bastion`.
+        #[arg(long, value_name = "DIR")]
+        out: Option<PathBuf>,
+    },
+    /// Import a `terraform.tfstate` (version 4) as Bastion state.
+    State {
+        /// The Terraform state file to read.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// The Bastion state file to write.
+        #[arg(long, value_name = "PATH")]
+        state: PathBuf,
+
+        /// Environment variable holding the state encryption passphrase.
+        #[arg(long, value_name = "VAR")]
+        passphrase_env: Option<String>,
+
+        /// Replace the Bastion state file if it already exists.
+        #[arg(long)]
+        force: bool,
     },
 }
 
 /// What to do with a state file via the `state` subcommand.
 #[derive(Subcommand)]
 enum StateAction {
-    /// Print the current state contents as JSON.
+    /// Print the current state contents as JSON (also available as `pull`).
+    #[command(alias = "pull")]
     Show,
     /// Print the append-only version history.
     History,
     /// Show the current lock holder, if any.
     LockStatus,
+    /// Remove a resource from state. Infrastructure is not changed.
+    Rm {
+        /// Resource id, e.g. `aws_s3_bucket.my_bucket`.
+        id: String,
+    },
+    /// Rename a resource id in state. Both ids must have the same type.
+    Mv {
+        /// Current id, e.g. `aws_s3_bucket.old`.
+        from: String,
+        /// New id, e.g. `aws_s3_bucket.new`.
+        to: String,
+    },
+    /// Replace state with the contents of a JSON file (as printed by `show`).
+    Push {
+        /// JSON file to read state from.
+        input: PathBuf,
+
+        /// Allow replacing state that belongs to a different lineage.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// What to do via the `provider` subcommand.
@@ -317,6 +450,20 @@ enum ProviderAction {
     },
     /// List providers registered in the default runtime.
     List,
+    /// Print a provider's schema (resource types, attributes, lifecycle).
+    Schema {
+        /// Provider name, as shown by `provider list`.
+        name: String,
+
+        /// Print the schema as JSON instead of a summary.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Generate Markdown reference docs for a provider from its schema.
+    Docs {
+        /// Provider name, as shown by `provider list`.
+        name: String,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -334,18 +481,37 @@ fn main() -> Result<()> {
             state,
             passphrase_env,
             json,
-        } => cmd_plan(&file, state.as_ref(), passphrase_env.as_deref(), json),
-        Command::Apply {
-            file,
-            state,
-            passphrase_env,
-            auto_approve,
-        } => cmd_apply(
+            out,
+            explain,
+        } => cmd_plan(
             &file,
             state.as_ref(),
             passphrase_env.as_deref(),
-            auto_approve,
+            json,
+            out.as_ref(),
+            explain,
         ),
+        Command::Apply {
+            file,
+            plan,
+            state,
+            passphrase_env,
+            auto_approve,
+            mock,
+        } => cmd_apply(
+            file.as_ref(),
+            plan.as_ref(),
+            state.as_ref(),
+            passphrase_env.as_deref(),
+            auto_approve,
+            mock,
+        ),
+        Command::Destroy {
+            state,
+            passphrase_env,
+            auto_approve,
+            mock,
+        } => cmd_destroy(&state, passphrase_env.as_deref(), auto_approve, mock),
         Command::State {
             file,
             passphrase_env,
@@ -363,6 +529,23 @@ fn main() -> Result<()> {
         Command::Graph { file, format } => cmd_graph(&file, format),
         Command::Init { dir } => cmd_init(&dir),
         Command::Fmt { files, check } => cmd_fmt(&files, check),
+        Command::Refresh {
+            state,
+            passphrase_env,
+        } => cmd_refresh(&state, passphrase_env.as_deref()),
+        Command::Import { what } => match what {
+            ImportAction::Tf { dir, out } => cmd_import_tf(&dir, out.as_ref()),
+            ImportAction::State {
+                file,
+                state,
+                passphrase_env,
+                force,
+            } => cmd_import_state(&file, &state, passphrase_env.as_deref(), force),
+        },
+        Command::Lsp => {
+            // stdout carries protocol messages only, so nothing else may print.
+            tpt_bastion_lsp::run(all_schemas()).context("language server failed")
+        }
         Command::Output {
             file,
             state,
@@ -411,14 +594,28 @@ fn main() -> Result<()> {
 
 /// Run `bastion plan` (or `apply --auto-approve`) for `file` in response to an
 /// external event, printing the result.
-fn run_bastion_on_event(file: &PathBuf, apply: bool) -> Result<()> {
+fn run_bastion_on_event(
+    file: &PathBuf,
+    apply: bool,
+    state: Option<&PathBuf>,
+    passphrase_env: Option<&str>,
+) -> Result<()> {
     let exe = std::env::current_exe().context("resolving current executable")?;
     let mut cmd = std::process::Command::new(exe);
     if apply {
-        let state = file.with_extension("bclstate");
-        cmd.args(["apply", "--auto-approve", "--state"]).arg(&state);
+        let state = state
+            .cloned()
+            .unwrap_or_else(|| file.with_extension("bclstate"));
+        cmd.args(["apply", "--auto-approve", "--mock", "--state"])
+            .arg(&state);
     } else {
         cmd.arg("plan");
+        if let Some(state) = state {
+            cmd.arg("--state").arg(state);
+        }
+    }
+    if let Some(var) = passphrase_env {
+        cmd.arg("--passphrase-env").arg(var);
     }
     cmd.arg(file);
     let status = cmd
@@ -432,7 +629,13 @@ fn run_bastion_on_event(file: &PathBuf, apply: bool) -> Result<()> {
 
 fn cmd_events(action: &EventsAction) -> Result<()> {
     match action {
-        EventsAction::Watch { file, watch, apply } => {
+        EventsAction::Watch {
+            file,
+            watch,
+            apply,
+            state,
+            passphrase_env,
+        } => {
             let paths = if watch.is_empty() {
                 vec![file.clone()]
             } else {
@@ -443,7 +646,9 @@ fn cmd_events(action: &EventsAction) -> Result<()> {
             println!("Watching {watched} path(s); Ctrl-C to stop.");
             run_forever(&mut source, |ev| {
                 println!("[event] {ev}");
-                if let Err(e) = run_bastion_on_event(file, *apply) {
+                if let Err(e) =
+                    run_bastion_on_event(file, *apply, state.as_ref(), passphrase_env.as_deref())
+                {
                     eprintln!("  error: {e:#}");
                 }
             });
@@ -453,6 +658,8 @@ fn cmd_events(action: &EventsAction) -> Result<()> {
             port,
             apply,
             secret_env,
+            state,
+            passphrase_env,
         } => {
             // Fail closed: a webhook that can trigger applies must be authenticated.
             let secret = if *apply {
@@ -485,7 +692,9 @@ fn cmd_events(action: &EventsAction) -> Result<()> {
             let mut source = source;
             run_forever(&mut source, |ev| {
                 println!("[event] {ev}");
-                if let Err(e) = run_bastion_on_event(file, *apply) {
+                if let Err(e) =
+                    run_bastion_on_event(file, *apply, state.as_ref(), passphrase_env.as_deref())
+                {
                     eprintln!("  error: {e:#}");
                 }
             });
@@ -527,7 +736,7 @@ fn cmd_ui(
 /// which also rejects cycles and references to unknown objects.
 fn cmd_validate(file: &PathBuf) -> Result<()> {
     let source = read_source(file)?;
-    let doc = compile_source(&source).map_err(|e| anyhow::anyhow!("compile failed: {e}"))?;
+    let doc = compile_source(&source).map_err(|e| compile_error(file, &source, e))?;
     let graph = tpt_bastion_engine::DepGraph::build(&doc)
         .map_err(|e| anyhow::anyhow!("dependency check failed: {e}"))?;
     let order = graph
@@ -546,7 +755,7 @@ fn cmd_validate(file: &PathBuf) -> Result<()> {
 /// the node that depends on it, so the diagram reads in creation order.
 fn cmd_graph(file: &PathBuf, format: GraphFormat) -> Result<()> {
     let source = read_source(file)?;
-    let doc = compile_source(&source).map_err(|e| anyhow::anyhow!("compile failed: {e}"))?;
+    let doc = compile_source(&source).map_err(|e| compile_error(file, &source, e))?;
     let graph = tpt_bastion_engine::DepGraph::build(&doc)
         .map_err(|e| anyhow::anyhow!("dependency check failed: {e}"))?;
     let mut nodes = graph.nodes.clone();
@@ -692,7 +901,7 @@ fn cmd_output(
     json: bool,
 ) -> Result<()> {
     let source = read_source(file)?;
-    let doc = compile_source(&source).map_err(|e| anyhow::anyhow!("compile failed: {e}"))?;
+    let doc = compile_source(&source).map_err(|e| compile_error(file, &source, e))?;
     let backend = build_backend(state_path, passphrase_env)?;
     let state = load_prior(&backend)?;
 
@@ -782,9 +991,9 @@ fn cmd_doctor(
     );
 
     if let Some(file) = file {
-        match read_source(file).and_then(|src| {
-            compile_source(&src).map_err(|e| anyhow::anyhow!("compile failed: {e}"))
-        }) {
+        match read_source(file)
+            .and_then(|src| compile_source(&src).map_err(|e| compile_error(file, &src, e)))
+        {
             Ok(doc) => {
                 report(true, "document", format!("{} compiles", file.display()));
                 match tpt_bastion_engine::DepGraph::build(&doc).and_then(|g| g.order().map(|_| ()))
@@ -974,7 +1183,7 @@ fn load_prior(backend: &FileStateBackend) -> Result<BastionState> {
 fn cmd_compile(file: &PathBuf, format: Format) -> Result<()> {
     let source = read_source(file)?;
 
-    let doc = compile_source(&source).map_err(|e| anyhow::anyhow!("compile failed: {e}"))?;
+    let doc = compile_source(&source).map_err(|e| compile_error(file, &source, e))?;
 
     match format {
         Format::Json => {
@@ -1023,63 +1232,221 @@ fn plan_to_json(plan: &tpt_bastion_engine::Plan, prior_count: usize) -> serde_js
     })
 }
 
+/// Format tag and version of a plan saved with `plan --out`.
+const SAVED_PLAN_FORMAT: &str = "bastion-plan";
+const SAVED_PLAN_VERSION: u32 = 1;
+
+/// A plan saved to disk. It holds the document the plan was made from, and a
+/// fingerprint of the prior resources so `apply --plan` can refuse a stale plan.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SavedPlan {
+    format: String,
+    version: u32,
+    prior_fingerprint: String,
+    ir: tpt_bastion_ir::Document,
+}
+
+/// Fingerprint of the resources in `state`. Only resources are hashed: an empty
+/// state gets a new lineage and timestamp on every run, so the whole state
+/// would never match.
+fn resources_fingerprint(state: &BastionState) -> Result<String> {
+    let json = serde_json::to_string(&state.resources).context("serializing state resources")?;
+    Ok(tpt_bastion_state::crypto::fingerprint(json.as_bytes()))
+}
+
+/// Prior state from `state`, or an empty state when no file is given.
+fn load_prior_state(state: Option<&PathBuf>, passphrase_env: Option<&str>) -> Result<BastionState> {
+    match state {
+        Some(p) => {
+            let backend = build_backend(p, passphrase_env)?;
+            load_prior(&backend)
+        }
+        None => Ok(BastionState::new()),
+    }
+}
+
 fn cmd_plan(
     file: &PathBuf,
     state: Option<&PathBuf>,
     passphrase_env: Option<&str>,
     json: bool,
+    out: Option<&PathBuf>,
+    explain: bool,
 ) -> Result<()> {
     let source = read_source(file)?;
+    let doc = compile_source(&source).map_err(|e| compile_error(file, &source, e))?;
+    let prior = load_prior_state(state, passphrase_env)?;
+    let prior_eng: EngineState = (&prior).into();
+    let plan = plan_document_with_state(&doc, &prior_eng)
+        .map_err(|e| anyhow::anyhow!("plan failed: {e}"))?;
 
-    let doc = compile_source(&source).map_err(|e| anyhow::anyhow!("compile failed: {e}"))?;
-    let prior = match state {
-        Some(p) => {
-            let backend = build_backend(p, passphrase_env)?;
-            let s: BastionState = load_prior(&backend)?;
-            EngineState::from(&s)
-        }
-        None => EngineState::new(),
-    };
-    let plan =
-        plan_document_with_state(&doc, &prior).map_err(|e| anyhow::anyhow!("plan failed: {e}"))?;
+    if let Some(path) = out {
+        let saved = SavedPlan {
+            format: SAVED_PLAN_FORMAT.into(),
+            version: SAVED_PLAN_VERSION,
+            prior_fingerprint: resources_fingerprint(&prior)?,
+            ir: doc,
+        };
+        let text = serde_json::to_string_pretty(&saved).context("serializing plan")?;
+        std::fs::write(path, text).with_context(|| format!("writing {}", path.display()))?;
+        // Stderr, so that `--json` output on stdout stays valid JSON.
+        eprintln!("Saved plan to {}", path.display());
+    }
 
     if json {
-        let value = plan_to_json(&plan, prior.resources.len());
+        let value = plan_to_json(&plan, prior_eng.resources.len());
         println!("{}", serde_json::to_string_pretty(&value)?);
         return Ok(());
     }
     println!("{}", render_plan(&plan));
-    if prior.resources.is_empty() {
+    if explain {
+        println!("Why:");
+        print!("{}", plan.explain());
+    }
+    if prior_eng.resources.is_empty() {
         println!("Note: no prior state; every resource plans as a create.");
     } else {
         println!(
             "Note: diffed against {} prior resource(s).",
-            prior.resources.len()
+            prior_eng.resources.len()
         );
     }
     Ok(())
 }
 
+/// A state lock held for the duration of an apply. It is released when dropped,
+/// on success and on every error path.
+struct StateLock {
+    backend: tpt_bastion_state::FileStateBackend,
+    guard: Option<tpt_bastion_state::LockGuard>,
+}
+
+impl Drop for StateLock {
+    fn drop(&mut self) {
+        if let Some(guard) = self.guard.take() {
+            if let Err(e) = self.backend.unlock(&guard) {
+                eprintln!("warning: could not release the state lock: {e}");
+            }
+        }
+    }
+}
+
+/// The refusal shown when apply is run without `--mock`.
+const NO_REAL_PROVIDER: &str = "apply needs a real provider, and none is wired into the CLI yet, \
+    so nothing would be created. Pass --mock to run the engine against the in-memory \
+    provider; only the state file will change.";
+
+/// `bastion destroy`: remove every resource recorded in state. Mock-only for now.
+fn cmd_destroy(
+    state_path: &PathBuf,
+    passphrase_env: Option<&str>,
+    auto_approve: bool,
+    mock: bool,
+) -> Result<()> {
+    anyhow::ensure!(mock, "{NO_REAL_PROVIDER}");
+    let _guard = if auto_approve {
+        let backend = build_backend(state_path, passphrase_env)?;
+        let holder = format!("bastion-cli-{}", process::id());
+        Some(StateLock {
+            guard: Some(
+                backend
+                    .lock(&holder, Duration::from_secs(300))
+                    .map_err(|e| anyhow::anyhow!("could not lock state: {e}"))?,
+            ),
+            backend,
+        })
+    } else {
+        None
+    };
+    let prior = load_prior_state(Some(state_path), passphrase_env)?;
+    let prior_eng: EngineState = (&prior).into();
+    let empty = tpt_bastion_ir::Document {
+        ir_version: tpt_bastion_ir::IR_VERSION,
+        config: None,
+        variables: Vec::new(),
+        resources: Vec::new(),
+        modules: Vec::new(),
+        outputs: Vec::new(),
+        policies: Vec::new(),
+    };
+    let plan = plan_document_with_state(&empty, &prior_eng)
+        .map_err(|e| anyhow::anyhow!("plan failed: {e}"))?;
+    println!("{}", render_plan(&plan));
+    if !auto_approve {
+        anyhow::bail!("destroy is destructive; re-run with --auto-approve to proceed");
+    }
+    let executor = Executor::new(MockProvider, Box::new(PrintingHandler::default()));
+    let new_eng = executor
+        .apply(&empty, &plan, &prior_eng)
+        .map_err(|e| anyhow::anyhow!("destroy failed: {e}"))?;
+    let backend = build_backend(state_path, passphrase_env)?;
+    let new_state: BastionState = new_eng.into();
+    backend
+        .save_state(&new_state)
+        .with_context(|| format!("saving state to {}", state_path.display()))?;
+    println!("State written to {}", state_path.display());
+    Ok(())
+}
+
 fn cmd_apply(
-    file: &PathBuf,
+    file: Option<&PathBuf>,
+    plan_file: Option<&PathBuf>,
     state: Option<&PathBuf>,
     passphrase_env: Option<&str>,
     auto_approve: bool,
+    mock: bool,
 ) -> Result<()> {
-    let source = read_source(file)?;
-
-    let doc = compile_source(&source).map_err(|e| anyhow::anyhow!("compile failed: {e}"))?;
-    let prior: BastionState = match state {
-        Some(p) => {
-            let backend = build_backend(p, passphrase_env)?;
-            load_prior(&backend)?
+    // Where the document and the expected prior state come from.
+    let (doc, expected_fingerprint) = match plan_file {
+        Some(path) => {
+            let text = std::fs::read_to_string(path)
+                .with_context(|| format!("reading {}", path.display()))?;
+            let saved: SavedPlan = serde_json::from_str(&text)
+                .with_context(|| format!("{} is not a saved plan", path.display()))?;
+            anyhow::ensure!(
+                saved.format == SAVED_PLAN_FORMAT && saved.version == SAVED_PLAN_VERSION,
+                "{}: unsupported plan format (expected {SAVED_PLAN_FORMAT} version {SAVED_PLAN_VERSION})",
+                path.display()
+            );
+            (saved.ir, Some(saved.prior_fingerprint))
         }
-        None => BastionState::new(),
+        None => {
+            let file = file.ok_or_else(|| anyhow::anyhow!("pass a FILE to plan, or --plan"))?;
+            let source = read_source(file)?;
+            let doc = compile_source(&source).map_err(|e| compile_error(file, &source, e))?;
+            (doc, None)
+        }
     };
+
+    // Take the lock before reading state, so no other run can change the state
+    // between the read and the write. Only needed when we will actually apply.
+    let _guard = match (auto_approve, state) {
+        (true, Some(p)) => {
+            let backend = build_backend(p, passphrase_env)?;
+            let holder = format!("bastion-cli-{}", process::id());
+            let guard = backend
+                .lock(&holder, Duration::from_secs(300))
+                .map_err(|e| anyhow::anyhow!("could not lock state: {e}"))?;
+            Some(StateLock {
+                backend,
+                guard: Some(guard),
+            })
+        }
+        _ => None,
+    };
+
+    let prior = load_prior_state(state, passphrase_env)?;
+    if let Some(expected) = expected_fingerprint {
+        let actual = resources_fingerprint(&prior)?;
+        anyhow::ensure!(
+            actual == expected,
+            "the state has changed since this plan was saved; run `bastion plan --out` again"
+        );
+    }
+
     let prior_eng: EngineState = (&prior).into();
     let plan = plan_document_with_state(&doc, &prior_eng)
         .map_err(|e| anyhow::anyhow!("plan failed: {e}"))?;
-
     println!("{}", render_plan(&plan));
 
     if !auto_approve {
@@ -1088,19 +1455,7 @@ fn cmd_apply(
              or pass --state to persist the resulting state"
         );
     }
-
-    // Acquire the state lock so concurrent `bastion` runs cannot clobber it.
-    let _guard = if let Some(p) = state {
-        let backend = build_backend(p, passphrase_env)?;
-        let holder = format!("bastion-cli-{}", process::id());
-        Some(
-            backend
-                .lock(&holder, Duration::from_secs(300))
-                .map_err(|e| anyhow::anyhow!("could not lock state: {e}"))?,
-        )
-    } else {
-        None
-    };
+    anyhow::ensure!(mock, "{NO_REAL_PROVIDER}");
 
     let executor = Executor::new(MockProvider, Box::new(PrintingHandler::default()));
     let new_eng = executor
@@ -1115,6 +1470,141 @@ fn cmd_apply(
             .with_context(|| format!("saving state to {}", p.display()))?;
         println!("State written to {}", p.display());
     }
+    Ok(())
+}
+
+/// Load state, change it, and save it, all while holding the state lock.
+fn update_state_locked(
+    file: &PathBuf,
+    passphrase_env: Option<&str>,
+    edit: impl FnOnce(&mut BastionState) -> Result<()>,
+) -> Result<()> {
+    update_state_if_changed(file, passphrase_env, |state| {
+        edit(state)?;
+        Ok(true)
+    })
+}
+
+/// Like [`update_state_locked`], but the edit returns whether it changed the
+/// state. Unchanged state is not saved, so no history entry is added for a no-op.
+fn update_state_if_changed(
+    file: &PathBuf,
+    passphrase_env: Option<&str>,
+    edit: impl FnOnce(&mut BastionState) -> Result<bool>,
+) -> Result<()> {
+    let backend = build_backend(file, passphrase_env)?;
+    let holder = format!("bastion-cli-{}", process::id());
+    let guard = backend
+        .lock(&holder, Duration::from_secs(300))
+        .map_err(|e| anyhow::anyhow!("could not lock state: {e}"))?;
+    let lock = StateLock {
+        backend,
+        guard: Some(guard),
+    };
+    let mut state = lock.backend.load_state().context("loading state")?;
+    if edit(&mut state)? {
+        lock.backend.save_state(&state).context("saving state")?;
+    }
+    Ok(())
+}
+
+/// `bastion refresh`: ask each recorded resource's provider for its live
+/// attributes, and update state to match. Changes no infrastructure.
+fn cmd_refresh(state_path: &PathBuf, passphrase_env: Option<&str>) -> Result<()> {
+    println!(
+        "note: refresh uses the in-tree mock provider, which reports the recorded state back. \
+         Real providers are not wired into the CLI yet."
+    );
+    update_state_if_changed(state_path, passphrase_env, |state| {
+        let recorded: EngineState = (&*state).into();
+        let (refreshed, report) = refresh_state(&recorded, &MockProvider)
+            .map_err(|e| anyhow::anyhow!("refresh failed: {e}"))?;
+        for (id, outcome) in &report.outcomes {
+            let line = match outcome {
+                tpt_bastion_engine::RefreshOutcome::Unchanged => "unchanged".to_string(),
+                tpt_bastion_engine::RefreshOutcome::Updated { changed_attributes } => {
+                    format!("updated ({})", changed_attributes.join(", "))
+                }
+                tpt_bastion_engine::RefreshOutcome::Missing => "missing; removed from state".into(),
+            };
+            println!("  {id}: {line}");
+        }
+        println!(
+            "{} resource(s) checked, {} differ from the provider.",
+            report.outcomes.len(),
+            report.drifted()
+        );
+        let changed = report.drifted() > 0;
+        if changed {
+            *state = refreshed.into();
+            println!("State written to {}", state_path.display());
+        }
+        Ok(changed)
+    })
+}
+
+fn state_rm(file: &PathBuf, passphrase_env: Option<&str>, id: &str) -> Result<()> {
+    update_state_locked(file, passphrase_env, |state| {
+        let before = state.resources.len();
+        state.resources.retain(|r| r.id != id);
+        anyhow::ensure!(
+            state.resources.len() < before,
+            "no resource `{id}` in state"
+        );
+        Ok(())
+    })?;
+    println!("Removed `{id}` from state. Infrastructure was not changed.");
+    Ok(())
+}
+
+fn state_mv(file: &PathBuf, passphrase_env: Option<&str>, from: &str, to: &str) -> Result<()> {
+    let (to_type, _) = to
+        .split_once('.')
+        .with_context(|| format!("`{to}` is not a `type.name` id"))?;
+    update_state_locked(file, passphrase_env, |state| {
+        anyhow::ensure!(
+            !state.resources.iter().any(|r| r.id == to),
+            "`{to}` already exists in state"
+        );
+        let resource = state
+            .resources
+            .iter_mut()
+            .find(|r| r.id == from)
+            .with_context(|| format!("no resource `{from}` in state"))?;
+        anyhow::ensure!(
+            resource.type_name == to_type,
+            "cannot move `{from}` ({}) to a different type ({to_type})",
+            resource.type_name
+        );
+        resource.id = to.to_string();
+        Ok(())
+    })?;
+    println!("Moved `{from}` to `{to}` in state.");
+    Ok(())
+}
+
+fn state_push(
+    file: &PathBuf,
+    passphrase_env: Option<&str>,
+    input: &PathBuf,
+    force: bool,
+) -> Result<()> {
+    let text =
+        std::fs::read_to_string(input).with_context(|| format!("reading {}", input.display()))?;
+    let incoming: BastionState = serde_json::from_str(&text)
+        .with_context(|| format!("{} is not a state file", input.display()))?;
+    update_state_locked(file, passphrase_env, |state| {
+        if !state.lineage.is_empty() && state.lineage != incoming.lineage && !force {
+            anyhow::bail!(
+                "{} belongs to a different lineage than the state being replaced; \
+                 pass --force to replace it anyway",
+                input.display()
+            );
+        }
+        *state = incoming;
+        Ok(())
+    })?;
+    println!("Replaced state from {}.", input.display());
     Ok(())
 }
 
@@ -1146,6 +1636,9 @@ fn cmd_state(file: &PathBuf, passphrase_env: Option<&str>, action: &StateAction)
                 }
             }
         }
+        StateAction::Rm { id } => state_rm(file, passphrase_env, id)?,
+        StateAction::Mv { from, to } => state_mv(file, passphrase_env, from, to)?,
+        StateAction::Push { input, force } => state_push(file, passphrase_env, input, *force)?,
         StateAction::LockStatus => {
             let lock_path = lock_file_for(file);
             match tpt_bastion_state::lock::read_lock_file(&lock_path)? {
@@ -1173,7 +1666,7 @@ fn cmd_drift(
     reconcile: bool,
 ) -> Result<()> {
     let source = read_source(file)?;
-    let doc = compile_source(&source).map_err(|e| anyhow::anyhow!("compile failed: {e}"))?;
+    let doc = compile_source(&source).map_err(|e| compile_error(file, &source, e))?;
 
     let backend = build_backend(state, passphrase_env)?;
     let recorded = backend.load_state().context("loading state")?;
@@ -1185,7 +1678,7 @@ fn cmd_drift(
         let (_report, plan) = detect_and_reconcile(&doc, &recorded);
         println!("\nReconciliation plan:");
         println!("{}", render_reconcile(&plan));
-        println!("Run `bastion apply --auto-approve --state <file>` to apply it.");
+        println!("Run `bastion apply --auto-approve --mock --state <file>` to apply it (mock provider only).");
     }
     Ok(())
 }
@@ -1207,6 +1700,17 @@ fn lock_file_for(state_path: &std::path::Path) -> PathBuf {
 fn default_registry() -> PluginRegistry {
     let runtime = NativeRuntime::new();
     runtime.register(Arc::new(NullProvider::new()));
+    // Built-in providers. The cloud providers are stubs: their schemas are real,
+    // but create and delete do not call the cloud APIs yet (see docs/status.md).
+    runtime.register(Arc::new(tpt_bastion_provider_aws::AwsProvider::new()));
+    runtime.register(Arc::new(tpt_bastion_provider_azure::AzureProvider::new()));
+    runtime.register(Arc::new(tpt_bastion_provider_gcp::GcpProvider::new()));
+    runtime.register(Arc::new(
+        tpt_bastion_provider_kubernetes::KubernetesProvider::new(),
+    ));
+    runtime.register(Arc::new(
+        tpt_bastion_provider_terraform_shim::TerraformShimProvider::new(),
+    ));
     let registry = PluginRegistry::new();
     registry.register_runtime("native", Arc::new(runtime));
     registry
@@ -1238,8 +1742,64 @@ fn cmd_provider(action: &ProviderAction) -> Result<()> {
                 }
             }
         }
+        ProviderAction::Schema { name, json } => {
+            let schema = provider_schema(name)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&schema)?);
+            } else {
+                println!("Provider `{}` {}", schema.name, schema.version);
+                for resource in &schema.resources {
+                    println!(
+                        "  {}: {} attribute(s)",
+                        resource.type_name,
+                        resource.attributes.len()
+                    );
+                }
+            }
+        }
+        ProviderAction::Docs { name } => {
+            print!("{}", provider_docs(&provider_schema(name)?));
+        }
     }
     Ok(())
+}
+
+/// The schema of a registered provider.
+fn provider_schema(name: &str) -> Result<tpt_bastion_providers::schema::ProviderSchema> {
+    let registry = default_registry();
+    let plugin = registry
+        .load(name)
+        .map_err(|e| anyhow::anyhow!("provider `{name}`: {e}"))?;
+    Ok(plugin.schema())
+}
+
+/// Markdown reference for one provider, generated from its schema.
+fn provider_docs(schema: &tpt_bastion_providers::schema::ProviderSchema) -> String {
+    let mut out = format!(
+        "# `{}` provider\n\nVersion {}. This page is generated by `bastion provider docs`; \
+         see `docs/status.md` for what each provider does today.\n",
+        schema.name, schema.version
+    );
+    for resource in &schema.resources {
+        out.push_str(&format!("\n## `{}`\n\n", resource.type_name));
+        if let Some(description) = &resource.description {
+            out.push_str(&format!("{description}\n\n"));
+        }
+        if !resource.attributes.is_empty() {
+            out.push_str("| Attribute | Type | Required | Computed |\n");
+            out.push_str("| --- | --- | --- | --- |\n");
+            for attr in &resource.attributes {
+                out.push_str(&format!(
+                    "| `{}` | {:?} | {} | {} |\n",
+                    attr.name,
+                    attr.value_type,
+                    if attr.required { "yes" } else { "no" },
+                    if attr.computed { "yes" } else { "no" },
+                ));
+            }
+        }
+    }
+    out
 }
 
 /// Plan text for the terminal: colored only when stdout is a terminal and
@@ -1252,4 +1812,114 @@ fn render_plan(plan: &tpt_bastion_engine::Plan) -> String {
     } else {
         plan.render()
     }
+}
+
+/// A compile error shown with its location and the offending source line.
+fn compile_error(
+    file: &std::path::Path,
+    source: &str,
+    err: tpt_bastion_dsl::error::DslError,
+) -> anyhow::Error {
+    let name = if file.as_os_str() == "-" {
+        "<stdin>".to_string()
+    } else {
+        file.display().to_string()
+    };
+    // anyhow prints its own "Error: " prefix, so drop the renderer's "error: ".
+    let rendered = tpt_bastion_dsl::diagnostic::render(source, &name, &err);
+    let text = rendered
+        .strip_prefix("error: ")
+        .unwrap_or(&rendered)
+        .to_string();
+    anyhow::anyhow!("{text}")
+}
+
+/// Schemas of every registered provider, for editor features that list types.
+fn all_schemas() -> Vec<tpt_bastion_providers::schema::ProviderSchema> {
+    let registry = default_registry();
+    registry
+        .names()
+        .iter()
+        .filter_map(|name| registry.load(name).ok())
+        .map(|plugin| plugin.schema())
+        .collect()
+}
+
+/// `bastion import tf`: convert each `.tf` file in `dir`, printing every construct
+/// that could not be converted, with its file and line.
+fn cmd_import_tf(dir: &std::path::Path, out: Option<&PathBuf>) -> Result<()> {
+    let out_dir = out.cloned().unwrap_or_else(|| dir.join("bastion"));
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .with_context(|| format!("reading {}", dir.display()))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|e| e == "tf"))
+        .collect();
+    files.sort();
+    anyhow::ensure!(!files.is_empty(), "no .tf files in {}", dir.display());
+    std::fs::create_dir_all(&out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
+
+    let mut notes_total = 0usize;
+    let mut failures = 0usize;
+    for file in &files {
+        let source =
+            std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+        match tpt_bastion_import::convert(&source) {
+            Ok(converted) => {
+                let stem = file.file_stem().unwrap_or_default();
+                let target = out_dir.join(format!("{}.bcl", stem.to_string_lossy()));
+                std::fs::write(&target, &converted.bcl)
+                    .with_context(|| format!("writing {}", target.display()))?;
+                println!("converted {} -> {}", file.display(), target.display());
+                for note in &converted.notes {
+                    println!("  {}:{}: {}", file.display(), note.line, note.message);
+                }
+                notes_total += converted.notes.len();
+            }
+            Err(e) => {
+                failures += 1;
+                eprintln!("error: {}: {e}", file.display());
+            }
+        }
+    }
+
+    println!(
+        "{notes_total} construct(s) not converted. Review each one before applying the result."
+    );
+    anyhow::ensure!(failures == 0, "{failures} file(s) could not be converted");
+    Ok(())
+}
+
+/// `bastion import state`: read a Terraform state file into a new Bastion state file.
+fn cmd_import_state(
+    file: &PathBuf,
+    state_path: &PathBuf,
+    passphrase_env: Option<&str>,
+    force: bool,
+) -> Result<()> {
+    let text =
+        std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+    let import = tpt_bastion_import::import_tfstate(&text)
+        .map_err(|e| anyhow::anyhow!("{}: {e}", file.display()))?;
+    for note in &import.notes {
+        println!("  {}: {}", file.display(), note.message);
+    }
+    anyhow::ensure!(
+        force || !state_path.exists(),
+        "{} already exists; pass --force to replace it",
+        state_path.display()
+    );
+
+    let count = import.resources.len();
+    let state =
+        BastionState::from_applied(tpt_bastion_state::state::new_lineage(), import.resources);
+    let backend = build_backend(state_path, passphrase_env)?;
+    backend
+        .save_state(&state)
+        .with_context(|| format!("saving state to {}", state_path.display()))?;
+    println!("imported {count} resource(s) into {}", state_path.display());
+    println!(
+        "{} construct(s) not imported. Review them before relying on this state.",
+        import.notes.len()
+    );
+    Ok(())
 }

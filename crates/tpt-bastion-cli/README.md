@@ -11,12 +11,15 @@ cargo run --bin bastion -- validate examples/aws_s3.bcl
 cargo run --bin bastion -- plan examples/aws_s3.bcl --json
 ```
 
-Subcommands: `compile`, `validate`, `graph`, `plan` (`--json`), `apply`,
-`state`, `drift`, `output`, `provider`, `events`, `ui`, `init`, `doctor`, and
-`completions`. Run `bastion <subcommand> --help` for details.
+Subcommands: `compile`, `validate`, `graph`, `fmt`, `plan` (`--json`, `--out`,
+`--explain`), `apply`, `destroy`, `refresh`, `state` (`show`/`pull`, `rm`, `mv`,
+`push`, `history`, `lock-status`), `drift`, `output`, `provider` (`list`,
+`schema`, `docs`, `scaffold`), `events`, `ui`, `import` (`tf`, `state`), `lsp`,
+`init`, `doctor`, and `completions`. Run `bastion <subcommand> --help` for details.
 
-`apply` uses an in-memory mock provider. It does not change real infrastructure
-yet. See [`docs/status.md`](../../docs/status.md).
+`apply` and `destroy` refuse to run without `--mock`. That flag selects the
+in-memory mock provider, which does not change real infrastructure. No real
+provider is wired into the CLI yet. See [`docs/status.md`](../../docs/status.md).
 
 See the workspace [README](../../README.md) for the project overview.
 
