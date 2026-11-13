@@ -41,6 +41,7 @@ fn doc_with(name: &str, bucket: &str) -> Document {
         }],
         modules: vec![],
         outputs: vec![],
+        policies: vec![],
     }
 }
 

@@ -4,7 +4,8 @@
 
 Native state management for [TPT Bastion](https://bastion.tpt.dev). Implements
 Phase 4 of the Bastion roadmap: encrypted state files, append-only version
-history, cooperative locking, drift detection, and automatic reconciliation.
+history, cooperative locking, plan-time drift detection against recorded state, and
+reconcile plans. Drift is not checked against live infrastructure yet.
 
 See the [crate docs](../../crates/tpt-bastion-state/src/lib.rs) for the module
 layout and usage. The `StateBackend` trait is the pluggable interface that

@@ -15,7 +15,8 @@ bastion ui examples/aws_s3.bcl
 ```
 
 Security: the server listens on loopback only and supports an optional bearer
-token (`--token`). The `apply` action is disabled unless explicitly enabled.
+token (`--token`). The `apply` action is disabled unless explicitly enabled, and it runs
+the mock provider, so it does not change real infrastructure.
 
 See the workspace [README](../../README.md) for the project overview.
 

@@ -40,7 +40,8 @@ pub trait StateBackend {
     ///
     /// Fails with [`StateError::LockHeld`] if another holder owns a live lock.
     /// Returns a [`LockGuard`] that must be presented to [`StateBackend::unlock`]
-    /// (or dropped) to release.
+    /// to release. Dropping the guard does not release the lock; it stays held
+    /// until it expires.
     fn lock(&self, holder: &str, ttl: Duration) -> Result<LockGuard, StateError>;
 
     /// Release a previously-acquired lock.

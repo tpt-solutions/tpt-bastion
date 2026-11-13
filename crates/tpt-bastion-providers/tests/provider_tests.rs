@@ -102,6 +102,7 @@ fn doc() -> Document {
         }],
         modules: vec![],
         outputs: vec![],
+        policies: vec![],
     }
 }
 

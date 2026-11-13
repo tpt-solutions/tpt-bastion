@@ -127,7 +127,8 @@ pub fn apply(config: &UiConfig) -> Result<String, String> {
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut cmd = std::process::Command::new(exe);
-    cmd.arg("apply").arg("--auto-approve");
+    // `--mock` is explicit: the dashboard only drives the in-memory provider today.
+    cmd.arg("apply").arg("--auto-approve").arg("--mock");
     if let Some(state) = &config.state {
         cmd.arg("--state").arg(state);
     }
