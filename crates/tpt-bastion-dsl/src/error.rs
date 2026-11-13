@@ -40,4 +40,36 @@ pub enum DslError {
         /// Human-readable cause.
         message: String,
     },
+    /// A semantic error tied to a position in the source.
+    #[error("compile error at {line}:{col}: {message}")]
+    Located {
+        /// 1-based line number.
+        line: usize,
+        /// 1-based column number.
+        col: usize,
+        /// Human-readable cause.
+        message: String,
+    },
+}
+
+impl DslError {
+    /// The 1-based `(line, col)` this error points at, if it has one.
+    pub fn location(&self) -> Option<(usize, usize)> {
+        match self {
+            DslError::Lex { line, col, .. }
+            | DslError::Parse { line, col, .. }
+            | DslError::Located { line, col, .. } => Some((*line, *col)),
+            DslError::Compile { .. } => None,
+        }
+    }
+
+    /// The message without the `compile error` / `parse error` prefix.
+    pub fn message(&self) -> &str {
+        match self {
+            DslError::Lex { message, .. }
+            | DslError::Parse { message, .. }
+            | DslError::Located { message, .. }
+            | DslError::Compile { message } => message,
+        }
+    }
 }

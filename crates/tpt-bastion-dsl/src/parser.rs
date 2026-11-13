@@ -76,17 +76,25 @@ impl Parser {
     }
 
     fn parse_block(&mut self) -> Result<Block, DslError> {
+        let start = self.peek().clone();
         let kind = self.expect_ident()?;
         let known = matches!(
             kind.as_str(),
-            "resource" | "module" | "variable" | "output" | "config"
+            "resource" | "module" | "variable" | "output" | "config" | "policy"
         );
         if !known {
             let tok = self.tokens[self.pos - 1].clone();
+            const KINDS: [&str; 6] = [
+                "resource", "module", "variable", "output", "config", "policy",
+            ];
+            let hint = crate::compiler::suggest(&kind, KINDS)
+                .map(|near| format!("; did you mean `{near}`?"))
+                .unwrap_or_default();
             return Err(self.error(
                 &tok,
                 format!(
-                    "unknown top-level block `{kind}` (expected one of: resource, module, variable, output, config)"
+                    "unknown top-level block `{kind}`{hint} (expected one of: {})",
+                    KINDS.join(", ")
                 ),
             ));
         }
@@ -109,6 +117,8 @@ impl Parser {
 
         Ok(Block {
             kind,
+            line: start.line,
+            col: start.col,
             type_name,
             name,
             attributes,
@@ -178,7 +188,12 @@ impl Parser {
                     self.advance();
                     path.push(self.expect_ident()?);
                 }
-                Ok(Expr::Reference { base, path })
+                Ok(Expr::Reference {
+                    base,
+                    path,
+                    line: tok.line,
+                    col: tok.col,
+                })
             }
             TokenKind::LeftBracket => {
                 self.advance();

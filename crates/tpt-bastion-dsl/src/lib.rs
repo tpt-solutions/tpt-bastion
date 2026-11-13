@@ -33,6 +33,7 @@
 
 pub mod ast;
 pub mod compiler;
+pub mod diagnostic;
 pub mod error;
 pub mod format;
 pub mod lexer;
@@ -149,6 +150,34 @@ mod tests {
             err.to_string().contains("variables cannot be referenced"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn compiles_a_policy_with_a_forbid_rule() {
+        let src = r#"
+            policy no_public {
+                resource_type = "aws_s3_bucket"
+                attribute = "acl"
+                forbid = "public-read"
+                message = "public buckets leak data"
+            }
+        "#;
+        let doc = compile_source(src).unwrap();
+        assert_eq!(doc.policies.len(), 1);
+        assert_eq!(doc.policies[0].name, "no_public");
+        assert!(matches!(
+            doc.policies[0].rule,
+            tpt_bastion_ir::PolicyRule::Forbid { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_a_policy_with_both_or_neither_rule() {
+        let neither = "policy p { resource_type = \"a\" attribute = \"b\" }";
+        assert!(compile_source(neither)
+            .unwrap_err()
+            .to_string()
+            .contains("exactly one"));
     }
 
     #[test]

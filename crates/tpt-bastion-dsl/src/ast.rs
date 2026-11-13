@@ -22,6 +22,10 @@ pub enum Expr {
         base: String,
         /// Attribute chain after the base, e.g. `["bucket"]`.
         path: Vec<String>,
+        /// 1-based line of the base identifier.
+        line: usize,
+        /// 1-based column of the base identifier.
+        col: usize,
     },
     /// An ordered list literal.
     List(Vec<Expr>),
@@ -34,6 +38,10 @@ pub enum Expr {
 pub struct Block {
     /// Block kind, e.g. `"resource"`.
     pub kind: String,
+    /// 1-based line of the block keyword.
+    pub line: usize,
+    /// 1-based column of the block keyword.
+    pub col: usize,
     /// Optional type label (used by `resource`, e.g. `aws_s3_bucket`).
     pub type_name: Option<String>,
     /// Optional name label (the local name of the object).

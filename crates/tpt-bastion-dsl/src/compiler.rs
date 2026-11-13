@@ -2,13 +2,16 @@
 
 //! Lower an AST into a typed [`tpt_bastion_ir::Document`].
 
-use crate::ast::{Block, Expr};
+use crate::ast::{Ast, Block, Expr};
 use crate::error::DslError;
 use std::collections::BTreeMap;
-use tpt_bastion_ir::{Config, Document, Module, Output, Resource, Value, Variable, IR_VERSION};
+use tpt_bastion_ir::{
+    Config, Document, Module, Output, Policy, PolicyRule, Resource, Value, Variable, IR_VERSION,
+};
 
 /// Compile a parsed AST into a Bastion IR [`Document`].
 pub fn compile(ast: &crate::ast::Ast) -> Result<Document, DslError> {
+    check_references(ast)?;
     let mut doc = Document {
         ir_version: IR_VERSION,
         config: None,
@@ -16,6 +19,7 @@ pub fn compile(ast: &crate::ast::Ast) -> Result<Document, DslError> {
         resources: Vec::new(),
         modules: Vec::new(),
         outputs: Vec::new(),
+        policies: Vec::new(),
     };
 
     let mut seen_resources = std::collections::HashSet::new();
@@ -24,7 +28,9 @@ pub fn compile(ast: &crate::ast::Ast) -> Result<Document, DslError> {
         match block.kind.as_str() {
             "config" => {
                 if doc.config.is_some() {
-                    return Err(DslError::Compile {
+                    return Err(DslError::Located {
+                        line: block.line,
+                        col: block.col,
                         message: "duplicate `config` block".into(),
                     });
                 }
@@ -39,7 +45,9 @@ pub fn compile(ast: &crate::ast::Ast) -> Result<Document, DslError> {
                 })?;
                 let id = format!("{type_name}.{name}");
                 if !seen_resources.insert(id.clone()) {
-                    return Err(DslError::Compile {
+                    return Err(DslError::Located {
+                        line: block.line,
+                        col: block.col,
                         message: format!("duplicate resource `{id}`"),
                     });
                 }
@@ -94,6 +102,10 @@ pub fn compile(ast: &crate::ast::Ast) -> Result<Document, DslError> {
                     })?;
                 doc.outputs.push(Output { name, value });
             }
+            "policy" => {
+                let policy = compile_policy(block)?;
+                doc.policies.push(policy);
+            }
             other => {
                 return Err(DslError::Compile {
                     message: format!("unsupported block kind `{other}`"),
@@ -102,62 +114,155 @@ pub fn compile(ast: &crate::ast::Ast) -> Result<Document, DslError> {
         }
     }
 
-    check_references(&doc)?;
     Ok(doc)
 }
 
-/// Every reference base mentioned in `value`, including nested lists and maps.
-fn collect_reference_bases(value: &Value, out: &mut Vec<String>) {
-    match value {
-        Value::Reference { base, .. } => out.push(base.clone()),
-        Value::List(items) => items
+/// Compile a `policy "name" { resource_type, attribute, forbid | require, message }`
+/// block. Exactly one of `forbid` and `require` must be given.
+fn compile_policy(block: &Block) -> Result<Policy, DslError> {
+    let located = |message: String| DslError::Located {
+        line: block.line,
+        col: block.col,
+        message,
+    };
+    let name = block
+        .name
+        .clone()
+        .ok_or_else(|| located("policy block missing a name".into()))?;
+    let attrs = compile_attrs(block)?;
+    let text = |key: &str| -> Result<String, DslError> {
+        match attrs.get(key) {
+            Some(Value::String(s)) => Ok(s.clone()),
+            _ => Err(located(format!("policy `{name}` needs a string `{key}`"))),
+        }
+    };
+    let resource_type = text("resource_type")?;
+    let attribute = text("attribute")?;
+    let message = match attrs.get("message") {
+        Some(Value::String(s)) => Some(s.clone()),
+        Some(_) => {
+            return Err(located(format!(
+                "policy `{name}`: `message` must be a string"
+            )))
+        }
+        None => None,
+    };
+    let rule = match (attrs.get("forbid"), attrs.get("require")) {
+        (Some(value), None) => PolicyRule::Forbid {
+            value: value.clone(),
+        },
+        (None, Some(value)) => PolicyRule::Require {
+            value: value.clone(),
+        },
+        _ => {
+            return Err(located(format!(
+                "policy `{name}` needs exactly one of `forbid` or `require`"
+            )))
+        }
+    };
+    Ok(Policy {
+        name,
+        resource_type,
+        attribute,
+        rule,
+        message,
+    })
+}
+
+/// Every reference in `expr` as `(base, line, col)`, including nested lists and maps.
+fn collect_references(expr: &Expr, out: &mut Vec<(String, usize, usize)>) {
+    match expr {
+        Expr::Reference {
+            base, line, col, ..
+        } => out.push((base.clone(), *line, *col)),
+        Expr::List(items) => items.iter().for_each(|item| collect_references(item, out)),
+        Expr::Map(entries) => entries
             .iter()
-            .for_each(|item| collect_reference_bases(item, out)),
-        Value::Map(map) => map
-            .values()
-            .for_each(|item| collect_reference_bases(item, out)),
+            .for_each(|(_, item)| collect_references(item, out)),
         _ => {}
     }
 }
 
-/// Reject references to names that cannot be resolved, so the error appears at
-/// compile time rather than at plan time.
-///
-/// Only resources can be referenced today. A reference to a variable or module
-/// is rejected here too, with a message saying so, because the engine cannot
-/// resolve it either.
-fn check_references(doc: &Document) -> Result<(), DslError> {
-    let resource_names: std::collections::HashSet<&str> =
-        doc.resources.iter().map(|r| r.name.as_str()).collect();
-    let variable_names: std::collections::HashSet<&str> =
-        doc.variables.iter().map(|v| v.name.as_str()).collect();
+/// Levenshtein distance between two names.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut cur = vec![i + 1; b.len() + 1];
+        for (j, cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != *cb);
+            cur[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(cur[j] + 1);
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
 
-    let check = |owner: &str, value: &Value| -> Result<(), DslError> {
-        let mut bases = Vec::new();
-        collect_reference_bases(value, &mut bases);
-        for base in bases {
-            if resource_names.contains(base.as_str()) {
+/// The candidate closest to `name`, if it is near enough to be a likely typo.
+pub(crate) fn suggest<'a>(
+    name: &str,
+    candidates: impl IntoIterator<Item = &'a str>,
+) -> Option<&'a str> {
+    let limit = (name.chars().count() / 3).clamp(1, 3);
+    candidates
+        .into_iter()
+        .map(|candidate| (edit_distance(name, candidate), candidate))
+        .filter(|(distance, _)| *distance <= limit)
+        .min_by_key(|(distance, _)| *distance)
+        .map(|(_, candidate)| candidate)
+}
+
+/// Reject references to names that cannot be resolved, at the position of the
+/// reference, so the error appears at compile time rather than at plan time.
+///
+/// Only resources can be referenced today. A reference to a variable is rejected
+/// with a message saying so, because the engine cannot resolve it either.
+fn check_references(ast: &Ast) -> Result<(), DslError> {
+    let resource_names: Vec<&str> = ast
+        .blocks
+        .iter()
+        .filter(|b| b.kind == "resource")
+        .filter_map(|b| b.name.as_deref())
+        .collect();
+    let variable_names: Vec<&str> = ast
+        .blocks
+        .iter()
+        .filter(|b| b.kind == "variable")
+        .filter_map(|b| b.name.as_deref())
+        .collect();
+
+    for block in &ast.blocks {
+        let owner = match block.kind.as_str() {
+            "resource" => format!(
+                "`{}.{}`",
+                block.type_name.as_deref().unwrap_or("?"),
+                block.name.as_deref().unwrap_or("?")
+            ),
+            "output" => format!("output `{}`", block.name.as_deref().unwrap_or("?")),
+            _ => continue,
+        };
+        let mut refs = Vec::new();
+        for (_, value) in &block.attributes {
+            collect_references(value, &mut refs);
+        }
+        for (base, line, col) in refs {
+            if resource_names.contains(&base.as_str()) {
                 continue;
             }
-            let detail = if variable_names.contains(base.as_str()) {
+            let detail = if variable_names.contains(&base.as_str()) {
                 "variables cannot be referenced yet".to_string()
             } else {
-                "no resource has that name".to_string()
+                match suggest(&base, resource_names.iter().copied()) {
+                    Some(near) => format!("no resource has that name; did you mean `{near}`?"),
+                    None => "no resource has that name".to_string(),
+                }
             };
-            return Err(DslError::Compile {
+            return Err(DslError::Located {
+                line,
+                col,
                 message: format!("{owner} references unknown `{base}`: {detail}"),
             });
         }
-        Ok(())
-    };
-
-    for resource in &doc.resources {
-        for value in resource.attributes.values() {
-            check(&format!("`{}`", resource.id), value)?;
-        }
-    }
-    for output in &doc.outputs {
-        check(&format!("output `{}`", output.name), &output.value)?;
     }
     Ok(())
 }
@@ -204,7 +309,7 @@ fn compile_expr(expr: &Expr) -> Result<Value, DslError> {
         Expr::Number(n) => Value::Number(*n),
         Expr::Bool(b) => Value::Bool(*b),
         Expr::Null => Value::Null,
-        Expr::Reference { base, path } => Value::Reference {
+        Expr::Reference { base, path, .. } => Value::Reference {
             base: base.clone(),
             path: path.clone(),
         },
