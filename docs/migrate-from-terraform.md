@@ -75,19 +75,56 @@ Provider schemas are described in data (`ProviderSchema`), so tooling can
 validate and document a provider without executing it — the same model Terraform
 uses for `terraform providers schema`.
 
+## Converting configuration
+
+`bastion import tf <dir>` converts each `.tf` file to a `.bcl` file, by default
+under `<dir>/bastion/`:
+
+```sh
+bastion import tf ./infra
+bastion validate ./infra/bastion/main.bcl
+```
+
+The converter is conservative. Anything it cannot translate faithfully is left
+out and reported with its file and line number. Nothing is approximated. Typical
+notes:
+
+- `count` and `for_each` create several resources from one block. The whole
+  resource is skipped, because one resource would describe something different
+  from what gets created.
+- Variable references (`var.*`) and string interpolation (`${...}`) are not
+  supported yet. The attribute is skipped.
+- Function calls, `locals`, `data`, `module`, `dynamic`, `lifecycle`, and
+  `provisioner` are not supported yet.
+- `variable` descriptions and `terraform` settings are dropped. Configure
+  backends and providers in Bastion.
+
+Every converted document is checked with the Bastion compiler before it is
+written, so a converted file always compiles. Review every note before applying
+the result. The converted output for the repository's example is in
+`examples/migration/`, and its tests fail if the converter's output changes.
+
 ## State migration
 
-Bastion state is a self-describing, encrypted file. To migrate:
+`bastion import state <terraform.tfstate>` reads a version 4 state file and
+writes a Bastion state file:
 
-1. Export current Terraform state to JSON (`terraform show -json`).
-2. Map resource addresses to Bastion `type.name` ids.
-3. Import into a Bastion state file (`bastion state` tooling), preserving the
-   resource ids so future plans diff cleanly.
+```sh
+terraform show -json > /dev/null        # optional: confirm the state is readable
+bastion import state terraform.tfstate --state infra.bclstate --passphrase-env BASTION_PASS
+```
 
-> Note: automated Terraform→Bastion state import is tracked for a later release.
-> The native state format and `from`/`into` conversions between
-> `tpt_bastion_state::State` and `tpt_bastion_engine::State` already make the in-memory
-> mapping straightforward.
+- Each managed resource with one instance becomes a Bastion resource with the
+  same `type.name` id, so plans diff cleanly against the converted document.
+- Resources with several instances (from `count` or `for_each`) are reported and
+  not imported, because the indexed ids are not modelled yet.
+- Data sources are read-only and are not imported.
+- The command refuses to overwrite an existing state file unless `--force` is
+  given.
+
+Imported state records what Terraform reported. It does not check the real
+infrastructure, so run `bastion refresh` once the provider reads are implemented
+(see [Status](status.md)) before relying on it.
 
 ## Rollout strategy
 

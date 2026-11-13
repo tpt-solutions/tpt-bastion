@@ -178,6 +178,26 @@ output bucket_name {
 - `value` attribute is required; a missing `value` is a compile error.
 - The value is typically a reference, but may be any expression.
 
+### 3.6 `policy`
+
+```bcl
+policy no_public_buckets {
+  resource_type = "aws_s3_bucket"
+  attribute     = "acl"
+  forbid        = "public-read"
+  message       = "public buckets leak data"
+}
+```
+
+- `name` label is required (an identifier, not a string).
+- `resource_type` and `attribute` are required strings.
+- Exactly one of `forbid` (the attribute must not equal the value) or `require`
+  (it must equal the value) is required.
+- `message` is optional and is shown with a violation.
+- Planning fails with a violation message when a declared resource breaks a
+  rule. A reference-valued attribute is not checked, because its value is only
+  known after apply.
+
 ---
 
 ## 4. Expressions and references

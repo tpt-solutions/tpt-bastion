@@ -92,17 +92,18 @@ Findings from the project review. Several earlier `[x]` items above are overstat
 ### 11.1 Correctness & security fixes
 - [x] Events webhook + UI: compare secret/token with original case (only lowercase header names); fix webhook POST response; remove dead `header_len`
 - [x] UI: add Origin/Host (CSRF) check on POST `/api/apply`; show file label from `/api/info`
-- [ ] Sandbox: make landlock policy actually read-only outside allowed paths; stop swallowing errors; document Windows/macOS limits
-- [ ] terraform-shim: per-resource workdir, persist tfstate, make `delete` really destroy, serialize per dir
-- [ ] Commit `todo 1260715.md` → `history/` move; stop ignoring and commit `Cargo.lock`
+- [x] Sandbox: make landlock policy actually read-only outside allowed paths; stop swallowing errors; document Windows/macOS limits
+- [x] terraform-shim: per-resource workdir, persist tfstate, make `delete` really destroy, serialize per dir
+- [x] Commit `todo 1260715.md` → `history/` move; stop ignoring `Cargo.lock` (the lock file itself is committed with the next commit)
 
 ### 11.2 Engine & provider plumbing
 - [x] Extend `Provider` trait with `read` and `update`; add `ProviderRouter` (type prefix → provider)
-- [ ] Attribute-level plan diff (Create/Update/Replace/NoOp/Delete, "known after apply")
+- [x] Attribute-level plan diff (Create/Update/Replace/NoOp/Delete, "known after apply")
 - [x] Executor: real update path, no-op for unchanged, rollback on delete failure, preserve untouched resources in state
 - [ ] `bastion apply` uses real providers (MockProvider only behind `--mock`); add `destroy` and `refresh`
-- [ ] Live drift detection via provider `read`
-- [ ] Provider config (region/credentials) from `config` block; `bastion events` accepts `--state`/passphrase
+- [ ] Live drift detection via provider `read` (engine `refresh` exists; `drift` does not use it yet)
+- [ ] Provider config (region/credentials) from `config` block
+- [x] `bastion events` accepts `--state` and passphrase options
 
 ### 11.3 Real cloud providers (replace `TODO(sdk)` echo stubs)
 - [ ] Kubernetes: real create/read/update/delete for all 6 resource types
@@ -118,36 +119,37 @@ Findings from the project review. Several earlier `[x]` items above are overstat
 - [x] `bastion doctor`
 - [x] `bastion completions` (bash/zsh/fish/powershell)
 - [x] `bastion graph` (DOT/mermaid) and `bastion output`
-- [ ] Colored plan diff, `--json` plan output, saved plan files (`--out`)
-- [ ] Source-span diagnostics with caret snippets and "did you mean" (incl. compile errors)
+- [x] Colored plan diff, `--json` plan output, saved plan files (`--out`)
+- [x] Source-span diagnostics with caret snippets and "did you mean" (incl. compile errors)
 - [x] Compile-time reference validation
 - [ ] DSL: `count`/`for_each` expansion, variable default/usage checks, module expansion
-- [ ] `plan --explain` (why each change happens)
-- [ ] Policy-as-code: `policy {}` rules evaluated at plan time
+- [x] `plan --explain` (why each change happens)
+- [x] Policy-as-code: `policy {}` rules evaluated at plan time
 
 ### 11.5 Terraform migration
-- [ ] New `bastion-import` crate: HCL2 `.tf` → `.bcl` converter with unsupported-construct reporting
-- [ ] `bastion import tf <dir>`
-- [ ] `bastion import state <terraform.tfstate>` → Bastion encrypted state
-- [ ] `bastion state rm/mv/pull/push`
-- [ ] Golden-file migration examples in `examples/migration/`; update migration guide
+- [x] New `tpt-bastion-import` crate: HCL2 subset `.tf` → `.bcl` converter with unsupported-construct reporting (subset only; see the migration guide)
+- [x] `bastion import tf <dir>`
+- [x] `bastion import state <terraform.tfstate>` → Bastion encrypted state (with `--passphrase-env`)
+- [x] `bastion state rm/mv/pull/push`
+- [x] Golden-file migration examples in `examples/migration/`; update migration guide
 
 ### 11.6 Editor support
-- [ ] VS Code extension: TextMate grammar, language config, snippets, `.vsix` build in CI
-- [ ] `bastion-lsp` (diagnostics, formatting, hover/go-to-definition, resource-type completion) + `bastion lsp`
-- [ ] `bastion provider schema <name> --json` and generated provider docs
+- [x] VS Code extension: TextMate grammar, language config, snippets, `.vsix` build in CI
+- [x] `bastion-lsp` (diagnostics, formatting, hover/go-to-definition, resource-type completion) + `bastion lsp`
+- [x] `bastion provider schema <name> --json` and generated provider docs
 
 ### 11.7 Release & install pipeline
 - [x] Consistent release asset names; fix `install.sh` / `install.ps1` 404s
-- [ ] Publish `SHA256SUMS` + signatures; verify checksums in install scripts; musl detection
+- [x] Publish `SHA256SUMS` + signatures; verify checksums in install scripts; musl detection
 - [x] Fix `cargo publish` order (add `bastion-events`, `bastion-ui`), remove `|| true` / `--no-verify`
 - [ ] Homebrew formula: real sha256 (auto-bump in release workflow); winget/scoop manifests
 - [ ] `setup-bastion` GitHub Action; Docker image smoke test in CI
 - [ ] CI: Windows/macOS test matrix, MSRV, cargo-deny/audit
-- [ ] TypeScript binding: build to `dist`, derive `ir_version` from CLI; publish bindings to npm/PyPI
+- [x] TypeScript binding: build to `dist`, derive `ir_version` from the Rust source (also Python)
+- [ ] Publish TypeScript and Python bindings to npm and PyPI (needs registry tokens)
 
 ### 11.8 Docs honesty
-- [ ] Rewrite `CLAUDE.md`, `README.md` crate table/layout, crate and provider READMEs to match reality
+- [x] Rewrite `CLAUDE.md`, `README.md` crate table/layout, crate and provider READMEs to match reality
 - [x] Replace "Wasm" claims with "sandboxed subprocess provider ABI" (or build the Wasm host)
 - [x] Remove "real-time drift" wording until live refresh ships; add provider/resource status matrix
 - [x] Correct over-checked items in Phases 3–6 and 9
