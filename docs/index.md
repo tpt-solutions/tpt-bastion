@@ -17,10 +17,14 @@ license can *never* be restricted against the community.
   relicensing.
 - **Native state** — encrypted, versioned state files with no separate backend
   required (pluggable for [TPT Keystone] later).
-- **Real-time drift detection** with automatic reconciliation.
-- **Wasm provider sandboxing** — providers run isolated, with first-class
-  support for AWS, GCP, Azure, Kubernetes, and Terraform-compatible providers.
-- **Event-driven updates** — reconcile infrastructure on external events.
+- **Plan-time drift detection** against recorded state. Live refresh is not
+  built yet.
+- **Subprocess provider isolation** — each provider runs as its own process
+  with resource limits. A Wasm host is not built.
+- **Event-driven updates** — plan or apply when files change or a webhook fires.
+
+See [Status](status.md) for what works today. The `apply` command currently
+uses a mock provider, and the cloud providers are stubs.
 
 ## Start here
 

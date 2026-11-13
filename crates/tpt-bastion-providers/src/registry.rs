@@ -24,7 +24,7 @@ impl PluginRegistry {
         }
     }
 
-    /// Register a runtime under `namespace` (e.g. `"native"`, `"wasm"`).
+    /// Register a runtime under `namespace` (e.g. `"native"`, `"subprocess"`).
     pub fn register_runtime(&self, namespace: &str, runtime: Arc<dyn ProviderRuntime>) {
         if let Ok(mut g) = self.runtimes.write() {
             g.push((namespace.to_string(), runtime));

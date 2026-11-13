@@ -7,8 +7,8 @@
 site_name: TPT Bastion
 site_description: >-
   Next-generation Infrastructure-as-Code platform in Rust. Type-safe DSL,
-  native encrypted state, drift detection, Wasm provider sandboxing, and
-  event-driven reconciliation.
+  native encrypted state, plan-time drift detection, subprocess provider
+  isolation, and event-driven reconciliation.
 site_url: https://bastion.tpt.dev
 site_author: TPT
 copyright: >-
@@ -52,6 +52,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Status: status.md
   - Getting Started: getting-started.md
   - Language Reference: language-reference.md
   - Provider Guide: provider-guide.md

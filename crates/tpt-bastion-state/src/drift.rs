@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! Real-time drift detection.
+//! Drift detection against recorded state.
+//!
+//! This runs at plan time and compares the document with the state file. It
+//! does not query the infrastructure, so changes made outside Bastion are not
+//! seen until a provider `read` is wired in.
 //!
 //! Drift is the gap between what the [`tpt_bastion_ir::Document`] *declares* and what
 //! the recorded [`State`] *actually* holds. This module produces a

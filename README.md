@@ -18,28 +18,34 @@ the community.
   relicensing.
 - **Native state** — encrypted, versioned state files with no separate backend
   required (pluggable for [TPT Keystone] later).
-- **Real-time drift detection** with automatic reconciliation.
-- **Wasm provider sandboxing** — providers run isolated, with first-class
-  support for AWS, GCP, Azure, Kubernetes, and Terraform-compatible providers.
-- **Event-driven updates** — reconcile infrastructure on external events
-  (via [TPT Flux]).
-- **Language bindings** — drive your infrastructure from TypeScript or Python
-  against the same IR.
+- **Plan-time drift detection** against recorded state. Live refresh from
+  infrastructure is not built yet.
+- **Subprocess provider isolation** — each provider runs as its own process,
+  with resource limits and (on Linux) a read-only filesystem policy. A Wasm
+  host is not built.
+- **Event-driven updates** — plan or apply when files change or a webhook
+  fires.
+- **Language bindings** — compile the same DSL from TypeScript or Python.
 
 ## Status
 
-Bastion is under active development. The core platform is in place and the CLI
-is runnable end-to-end: compile → plan → apply, with encrypted native state,
-drift detection, a Wasm-ready provider runtime, and language bindings.
+Bastion is under active development. The DSL, plan, native state, and event
+pipeline work. `bastion apply` runs an in-memory mock provider, so it does not
+change real infrastructure. The AWS, GCP, Azure, and Kubernetes providers are
+stubs that do not call their cloud APIs.
 
-| Crate             | Purpose                                                       |
-| ----------------- | ------------------------------------------------------------- |
-| `tpt-bastion-ir`      | The versioned intermediate representation.                   |
-| `tpt-bastion-dsl`     | The DSL lexer, parser, and AST→IR compiler.                  |
-| `tpt-bastion-engine`  | Dependency graph, planning, and parallel execution core.     |
-| `tpt-bastion-state`   | Encrypted, versioned, lock-aware native state management.    |
-| `tpt-bastion-providers` | Provider SDK, schema, runtime, registry, and scaffolding.  |
-| `tpt-bastion-cli`     | The `bastion` command-line tool.                             |
+The full, feature-by-feature account is in [`docs/status.md`](docs/status.md).
+
+| Crate                   | Purpose                                                       |
+| ----------------------- | ------------------------------------------------------------- |
+| `tpt-bastion-ir`        | The versioned intermediate representation.                    |
+| `tpt-bastion-dsl`       | The DSL lexer, parser, and AST→IR compiler.                   |
+| `tpt-bastion-engine`    | Dependency graph, planning, and parallel execution core.      |
+| `tpt-bastion-state`     | Encrypted, versioned, lock-aware native state and drift.      |
+| `tpt-bastion-providers` | Provider ABI, subprocess runtime, sandboxing, and registry.   |
+| `tpt-bastion-events`    | File-change and webhook event sources.                        |
+| `tpt-bastion-ui`        | The localhost web dashboard.                                  |
+| `tpt-bastion-cli`       | The `bastion` command-line tool.                              |
 
 See [`docs/`](docs) for the language reference, provider guide, binding
 architecture, getting started, and the Terraform migration guide.
@@ -78,10 +84,17 @@ Homebrew, npm, and PyPI packages are published at release time; see
 
 ```
 crates/
-  tpt-bastion-ir/     IR types, versioning, serde
-  tpt-bastion-dsl/    DSL lexer, parser, AST, compiler
-  tpt-bastion-cli/    CLI entry point
-examples/         Example .bcl documents
+  tpt-bastion-ir/         IR types, versioning, serde
+  tpt-bastion-dsl/        DSL lexer, parser, AST, compiler
+  tpt-bastion-engine/     Dependency graph, plan, executor
+  tpt-bastion-state/      Native state, drift, reconcile
+  tpt-bastion-providers/  Provider ABI, subprocess runtime, sandbox
+  tpt-bastion-events/     Event sources (files, webhooks)
+  tpt-bastion-ui/         Localhost dashboard
+  tpt-bastion-cli/        `bastion` CLI entry point
+providers/                Cloud and Terraform-shim providers (stubs / experimental)
+bindings/                 TypeScript and Python bindings
+examples/                 Example .bcl documents
 ```
 
 ## Roadmap

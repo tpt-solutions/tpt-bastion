@@ -6,14 +6,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TPT Bastion is an early-stage, from-scratch Rust rewrite of Terraform ("the Post-Terraform"),
 built in response to HashiCorp's MPL→BSL relicensing. It is dual-licensed Apache-2.0/MIT and will
-never be relicensed against the community. See `README.md` for the pitch and `todo.md` for the
-full phased roadmap (Phase 0 through Phase 10, zero to public launch) — check `todo.md` before
-starting work to see what phase is in progress and what's already checked off.
+never be relicensed against the community. See `README.md` for the pitch, `docs/status.md` for
+what works today feature by feature, and `todo.md` for the phased roadmap. Check `todo.md`
+(Phase 11 is the current hardening pass) before starting work.
 
-Only the DSL → IR compiler pipeline plus the execution-engine foundation exist today (Phases 0–3,
-partially). The `tpt-bastion-engine` crate builds a dependency graph and a dry-run `plan` from IR. There
-is no apply runtime, state management, provider system, or language bindings yet — don't assume they
-exist.
+What exists: the DSL → IR compiler, a dependency-ordered plan with attribute-level diffs, the
+execution engine (create, update, destroy, rollback), encrypted native state with history and
+locking, plan-time drift detection, a subprocess provider ABI with sandboxing, event sources,
+a localhost dashboard, and TypeScript/Python bindings.
+
+What does not exist, or is only a stub. Do not assume these work:
+- `bastion apply` runs `MockProvider`. It never changes real infrastructure.
+- The AWS, GCP, Azure, and Kubernetes providers are stubs: no cloud API calls.
+- Drift detection does not query infrastructure. Provider `read` is not wired into it.
+- There is no Wasm host. Provider isolation is a subprocess.
 
 ## Commands
 
@@ -33,9 +39,10 @@ jobs on every push/PR to `master`. Match this locally before considering work do
 
 ## Architecture
 
-Four crates under `crates/`, forming a strict pipeline: `tpt-bastion-dsl` depends on `tpt-bastion-ir`;
-`tpt-bastion-engine` depends on `tpt-bastion-ir`; `tpt-bastion-cli` depends on `tpt-bastion-dsl` and
-`tpt-bastion-engine`. Nothing depends on `tpt-bastion-cli`.
+Core crates live under `crates/`: `ir`, `dsl`, `engine`, `state`, `providers`, `events`, `ui`, and
+`cli`. `providers/` holds the cloud and Terraform-shim provider crates, which build on the
+`providers` crate. `bindings/` holds the TypeScript and Python packages. Nothing depends on
+`tpt-bastion-cli`. Dependencies flow `ir` → `dsl`/`engine` → `state`/`providers` → `ui`/`cli`.
 
 - **`tpt-bastion-ir`** — the versioned, serializable IR (`Document`, `Resource`, `Value`, etc.) that
   everything downstream (execution engine, state backends, providers, future TS/Python bindings)
@@ -58,14 +65,24 @@ Four crates under `crates/`, forming a strict pipeline: `tpt-bastion-dsl` depend
 
 - **`tpt-bastion-engine`** — the execution core. `graph.rs::DepGraph` builds a dependency graph purely
   from the IR's structured `Value::Reference` values and topologically orders it (Kahn's
-  algorithm) with cycle and unknown-reference detection; `plan.rs::Plan` walks that order into a
-  sequence of `Action`s. `lib.rs::plan_document()` is the convenience entry point (validates IR
-  compatibility, builds graph, returns a plan). There is no real apply yet — providers (Phase 6)
-  are required to mutate infrastructure.
+  algorithm) with cycle and unknown-reference detection. `plan.rs::Plan` diffs declared attributes
+  against prior state into `create`/`update`/`delete`/`no-op` actions. `provider.rs` defines the
+  `Provider` trait (`create`, `update`, `read`, `destroy`) and `ProviderRouter`, which routes by type
+  prefix. `executor.rs::Executor` applies a plan level by level and undoes earlier changes on failure.
 
-- **`tpt-bastion-cli`** — the `bastion` binary (clap-based). Has `compile` (`.bcl` → IR JSON) and
-  `plan` (dependency-ordered dry-run plan) subcommands. Later roadmap phases (apply/state) will
-  add subcommands here.
+- **`tpt-bastion-state`** — native state: encrypted or plaintext files, history, locking, drift
+  (`drift.rs`, plan-time only), and reconcile plans (`reconcile.rs`).
+
+- **`tpt-bastion-providers`** — the provider ABI (line-delimited JSON, `abi.rs`), the subprocess
+  runtime with resource limits and Linux landlock (`sandbox.rs`), the plugin registry, schemas, and
+  scaffolding. The cloud providers in `providers/` implement its `ProviderPlugin` trait.
+
+- **`tpt-bastion-events`** and **`tpt-bastion-ui`** — event sources (file changes, authenticated
+  webhooks) and the localhost dashboard. The dashboard refuses cross-origin POSTs.
+
+- **`tpt-bastion-cli`** — the `bastion` binary (clap-based). Subcommands: `compile`, `plan`
+  (`--json`), `apply`, `state`, `drift`, `provider`, `events`, `ui`, `validate`, `graph`, `output`,
+  `doctor`, `init`, `completions`.
 
 `examples/*.bcl` holds example DSL documents (`.bcl` extension) used as fixtures/demos — see
 `aws_s3.bcl` for the current canonical shape of `config`/`variable`/`resource`/`output` blocks and
