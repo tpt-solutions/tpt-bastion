@@ -4,8 +4,8 @@
 //!
 //! A [`Provider`] performs the actual infrastructure mutations behind an apply.
 //! The engine ships a [`MockProvider`] used for dry-runs and tests; real cloud
-//! providers (Phase 6) will implement the same trait behind the Wasm plugin
-//! runtime.
+//! providers implement the same trait through the plugin runtime in
+//! `tpt-bastion-providers`. Those cloud providers are still stubs.
 
 use crate::error::EngineError;
 use serde::{Deserialize, Serialize};
@@ -35,6 +35,31 @@ pub trait Provider {
     /// Create the given resource, returning its applied (post-create) state.
     fn create(&self, resource: &Resource) -> Result<AppliedResource, EngineError>;
 
+    /// Update a resource in place so it matches `desired`, returning its new
+    /// applied state. Providers that cannot update in place keep this default,
+    /// and the executor reports an error instead of silently recreating.
+    fn update(
+        &self,
+        current: &AppliedResource,
+        desired: &Resource,
+    ) -> Result<AppliedResource, EngineError> {
+        let _ = desired;
+        Err(EngineError::Provider(format!(
+            "updating `{}` in place is not supported by this provider",
+            current.id
+        )))
+    }
+
+    /// Re-read a resource from the real infrastructure. `Ok(None)` means the
+    /// resource no longer exists. The default reports the operation as
+    /// unsupported, so drift detection never assumes a resource is still there.
+    fn read(&self, current: &AppliedResource) -> Result<Option<AppliedResource>, EngineError> {
+        Err(EngineError::Provider(format!(
+            "reading `{}` is not supported by this provider",
+            current.id
+        )))
+    }
+
     /// Destroy a previously-applied resource (used during rollback).
     fn destroy(&self, resource: &AppliedResource) -> Result<(), EngineError>;
 }
@@ -52,7 +77,79 @@ impl Provider for MockProvider {
         })
     }
 
+    fn update(
+        &self,
+        _current: &AppliedResource,
+        desired: &Resource,
+    ) -> Result<AppliedResource, EngineError> {
+        self.create(desired)
+    }
+
+    fn read(&self, current: &AppliedResource) -> Result<Option<AppliedResource>, EngineError> {
+        Ok(Some(current.clone()))
+    }
+
     fn destroy(&self, _resource: &AppliedResource) -> Result<(), EngineError> {
         Ok(())
+    }
+}
+
+/// Routes each resource to a provider by the prefix of its type name.
+///
+/// Routes are matched by longest prefix, so `aws_s3_` can override a broader
+/// `aws_` route. A resource with no matching route is an error.
+#[derive(Default)]
+pub struct ProviderRouter {
+    routes: Vec<(String, Box<dyn Provider + Send + Sync>)>,
+}
+
+impl ProviderRouter {
+    /// An empty router.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Send every type whose name starts with `prefix` to `provider`.
+    pub fn route(
+        mut self,
+        prefix: impl Into<String>,
+        provider: Box<dyn Provider + Send + Sync>,
+    ) -> Self {
+        self.routes.push((prefix.into(), provider));
+        self
+    }
+
+    fn provider_for(&self, type_name: &str) -> Result<&(dyn Provider + Send + Sync), EngineError> {
+        self.routes
+            .iter()
+            .filter(|(prefix, _)| type_name.starts_with(prefix.as_str()))
+            .max_by_key(|(prefix, _)| prefix.len())
+            .map(|(_, provider)| provider.as_ref())
+            .ok_or_else(|| {
+                EngineError::Provider(format!("no provider is registered for `{type_name}`"))
+            })
+    }
+}
+
+impl Provider for ProviderRouter {
+    fn create(&self, resource: &Resource) -> Result<AppliedResource, EngineError> {
+        self.provider_for(&resource.type_name)?.create(resource)
+    }
+
+    fn update(
+        &self,
+        current: &AppliedResource,
+        desired: &Resource,
+    ) -> Result<AppliedResource, EngineError> {
+        self.provider_for(&current.type_name)?
+            .update(current, desired)
+    }
+
+    fn read(&self, current: &AppliedResource) -> Result<Option<AppliedResource>, EngineError> {
+        self.provider_for(&current.type_name)?.read(current)
+    }
+
+    fn destroy(&self, resource: &AppliedResource) -> Result<(), EngineError> {
+        self.provider_for(&resource.type_name)?.destroy(resource)
     }
 }

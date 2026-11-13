@@ -199,6 +199,26 @@ impl Provider for PluginProvider {
             .map_err(|e| EngineError::Provider(e.to_string()))
     }
 
+    fn update(
+        &self,
+        current: &AppliedResource,
+        desired: &IrResource,
+    ) -> Result<AppliedResource, EngineError> {
+        let mut req = ResourceRequest::from_resource(desired);
+        // The plugin sees the desired attributes under the current resource id.
+        req.id = current.id.clone();
+        self.plugin
+            .update(req)
+            .map_err(|e| EngineError::Provider(e.to_string()))
+    }
+
+    fn read(&self, current: &AppliedResource) -> Result<Option<AppliedResource>, EngineError> {
+        let req = ResourceRequest::from_applied(current);
+        self.plugin
+            .read(req)
+            .map_err(|e| EngineError::Provider(e.to_string()))
+    }
+
     fn destroy(&self, resource: &AppliedResource) -> Result<(), EngineError> {
         let req = ResourceRequest::from_applied(resource);
         self.plugin

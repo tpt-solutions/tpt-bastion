@@ -75,17 +75,16 @@ fn apply_is_idempotent_against_prior_state() {
         let state1 = exec.apply(&doc, &plan1, &State::new()).unwrap();
         assert_eq!(state1.resources.len(), n, "n={n}");
 
-        // Re-planning against the applied state must show updates, not creates.
+        // Re-planning an unchanged document against its applied state is a
+        // no-op for every resource: nothing is created or updated.
         let plan2 = plan_document_with_state(&doc, &state1).unwrap();
         assert_eq!(plan2.to_create, 0, "n={n}: nothing should re-create");
-        assert_eq!(plan2.to_update, n, "n={n}: all should update");
+        assert_eq!(plan2.to_update, 0, "n={n}: nothing should update");
+        assert_eq!(plan2.unchanged, n, "n={n}: all should be no-ops");
 
-        // A second apply must leave the resource count unchanged.
+        // Applying the no-op plan must keep every resource exactly as it was.
         let state2 = exec.apply(&doc, &plan2, &state1).unwrap();
-        assert_eq!(
-            state2.resources.len(),
-            n,
-            "n={n}: count stable after update"
-        );
+        assert_eq!(state2.resources.len(), n, "n={n}: count stable");
+        assert_eq!(state2.resources, state1.resources, "n={n}: state unchanged");
     }
 }

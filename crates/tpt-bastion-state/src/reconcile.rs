@@ -35,6 +35,7 @@ pub fn reconcile(report: &DriftReport) -> Plan {
             kind,
             id: item.id.clone(),
             type_name: item.type_name.clone(),
+            changes: Vec::new(),
         });
     }
 
@@ -60,6 +61,7 @@ pub fn reconcile(report: &DriftReport) -> Plan {
         to_create,
         to_update,
         to_delete,
+        unchanged: 0,
     }
 }
 

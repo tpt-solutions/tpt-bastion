@@ -43,9 +43,10 @@ impl<P: Provider + Send + Sync> Executor<P> {
     /// Run `plan` against `doc`, diffing from `prior` state, and return the
     /// resulting [`State`].
     ///
-    /// The apply is atomic from the caller's perspective: on any provider
-    /// failure the already-applied resources are rolled back and the prior
-    /// state is left untouched (the returned error carries the root cause).
+    /// Creates and updates run level by level. No-op resources keep their prior
+    /// record and are not touched. If anything fails, earlier changes are undone:
+    /// created resources are destroyed and updated resources are reverted to
+    /// their prior attributes. The returned error carries the root cause.
     pub fn apply(&self, doc: &Document, plan: &Plan, prior: &State) -> Result<State, EngineError> {
         let graph = DepGraph::build(doc)?;
         let levels = graph.levels();
@@ -58,6 +59,9 @@ impl<P: Provider + Send + Sync> Executor<P> {
             .map(|r| (r.name.as_str(), r.id.as_str()))
             .collect();
 
+        let prior_by_id: HashMap<&str, &AppliedResource> =
+            prior.resources.iter().map(|r| (r.id.as_str(), r)).collect();
+
         self.handler.handle(&Event::ApplyStart {
             to_create: plan.to_create,
             to_update: plan.to_update,
@@ -67,7 +71,11 @@ impl<P: Provider + Send + Sync> Executor<P> {
         // Build the create/update batches in level order (topo order keeps
         // levels non-decreasing, so consecutive equal-level actions batch up).
         let mut batches: Vec<(usize, Vec<&Action>)> = Vec::new();
-        for action in plan.actions.iter().filter(|a| a.kind != ActionKind::Delete) {
+        for action in plan
+            .actions
+            .iter()
+            .filter(|a| matches!(a.kind, ActionKind::Create | ActionKind::Update))
+        {
             let level = *levels.get(&action.id).unwrap_or(&0);
             match batches.last_mut() {
                 Some((lvl, items)) if *lvl == level => items.push(action),
@@ -75,10 +83,21 @@ impl<P: Provider + Send + Sync> Executor<P> {
             }
         }
 
-        // `applied` holds resources in creation order; reverse order = teardown
-        // order for rollback. `applied_by_id` resolves references at apply time.
-        let mut applied: Vec<AppliedResource> = Vec::new();
+        // `result` is the state returned on success. `undo` records how to
+        // reverse each change, in the order the changes were made.
+        // `applied_by_id` resolves references at apply time.
+        let mut result: Vec<AppliedResource> = Vec::new();
+        let mut undo: Vec<Undo> = Vec::new();
         let mut applied_by_id: HashMap<String, AppliedResource> = HashMap::new();
+
+        // Unchanged resources keep their prior record and are visible to
+        // references immediately. They are never touched or undone.
+        for action in plan.actions.iter().filter(|a| a.kind == ActionKind::NoOp) {
+            if let Some(prior_res) = prior_by_id.get(action.id.as_str()) {
+                applied_by_id.insert(action.id.clone(), (*prior_res).clone());
+                result.push((*prior_res).clone());
+            }
+        }
 
         for (level, batch) in batches {
             self.handler.handle(&Event::BatchStart {
@@ -87,9 +106,9 @@ impl<P: Provider + Send + Sync> Executor<P> {
             });
 
             // Resolve each resource's references against everything applied in
-            // earlier levels, then ask the provider to create it. Running the
-            // resolutions sequentially (cheap) before the parallel create keeps
-            // the closure free of shared mutable state.
+            // earlier levels, then ask the provider to create or update it.
+            // Running the resolutions sequentially (cheap) before the parallel
+            // calls keeps the closure free of shared mutable state.
             let resolved: Vec<Resource> = batch
                 .iter()
                 .map(|a| {
@@ -102,26 +121,50 @@ impl<P: Provider + Send + Sync> Executor<P> {
                 })
                 .collect::<Result<_, _>>()?;
 
-            let results: Vec<Result<AppliedResource, EngineError>> = resolved
+            // Each outcome pairs the new record with the prior record it replaced
+            // (updates only), so a later failure can revert the change.
+            type Outcome = Result<(AppliedResource, Option<AppliedResource>), EngineError>;
+            let results: Vec<Outcome> = resolved
                 .par_iter()
-                .map(|res| {
+                .zip(batch.par_iter())
+                .map(|(res, action)| {
                     self.handler
                         .handle(&Event::ResourceStart { id: res.id.clone() });
-                    self.provider.create(res)
+                    match action.kind {
+                        ActionKind::Update => {
+                            let current: &AppliedResource =
+                                prior_by_id.get(res.id.as_str()).copied().ok_or_else(|| {
+                                    EngineError::Provider(format!(
+                                        "no prior record for `{}` to update",
+                                        res.id
+                                    ))
+                                })?;
+                            let updated = self.provider.update(current, res)?;
+                            Ok((updated, Some(current.clone())))
+                        }
+                        _ => self.provider.create(res).map(|created| (created, None)),
+                    }
                 })
                 .collect();
 
-            // Commit successes, but bail (and roll back) on the first failure.
+            // Commit successes, but bail (and undo) on the first failure.
             let mut failed: Option<EngineError> = None;
-            for (res, result) in resolved.iter().zip(results) {
-                match result {
-                    Ok(applied_res) => {
+            for (res, outcome) in resolved.iter().zip(results) {
+                match outcome {
+                    Ok((applied_res, before)) => {
                         self.handler.handle(&Event::ResourceApplied {
                             resource: applied_res.clone(),
                             level,
                         });
                         applied_by_id.insert(applied_res.id.clone(), applied_res.clone());
-                        applied.push(applied_res);
+                        undo.push(match before {
+                            Some(before) => Undo::Revert {
+                                before,
+                                after: applied_res.clone(),
+                            },
+                            None => Undo::Destroy(applied_res.clone()),
+                        });
+                        result.push(applied_res);
                     }
                     Err(e) => {
                         self.handler.handle(&Event::ResourceFailed {
@@ -136,18 +179,32 @@ impl<P: Provider + Send + Sync> Executor<P> {
             }
 
             if let Some(err) = failed {
-                self.rollback(&applied)?;
-                return Err(err);
+                return Err(self.undo_changes(&undo, err));
             }
         }
 
-        // Finally, destroy resources that are no longer in the document.
-        let prior_by_id: HashMap<&str, &AppliedResource> =
-            prior.resources.iter().map(|r| (r.id.as_str(), r)).collect();
+        // Finally, destroy resources that are no longer in the document. If one
+        // fails, the resources already destroyed are recreated from their prior
+        // records, so the infrastructure matches the still-current state.
         let mut deleted = 0usize;
         for action in plan.actions.iter().filter(|a| a.kind == ActionKind::Delete) {
             if let Some(prior_res) = prior_by_id.get(action.id.as_str()) {
-                self.provider.destroy(prior_res)?;
+                if let Err(e) = self.provider.destroy(prior_res) {
+                    self.handler.handle(&Event::ResourceFailed {
+                        id: action.id.clone(),
+                        error: e.to_string(),
+                    });
+                    for destroyed in plan
+                        .actions
+                        .iter()
+                        .filter(|a| a.kind == ActionKind::Delete)
+                        .take(deleted)
+                        .filter_map(|a| prior_by_id.get(a.id.as_str()))
+                    {
+                        undo.push(Undo::Recreate((*destroyed).clone()));
+                    }
+                    return Err(self.undo_changes(&undo, e));
+                }
                 self.handler.handle(&Event::ResourceDeleted {
                     id: action.id.clone(),
                 });
@@ -172,21 +229,78 @@ impl<P: Provider + Send + Sync> Executor<P> {
             deleted,
         });
 
-        Ok(State::from_applied(applied))
+        Ok(State::from_applied(result))
     }
 
-    /// Tear down every applied resource in reverse creation order.
-    fn rollback(&self, applied: &[AppliedResource]) -> Result<(), EngineError> {
+    /// Reverse the recorded changes, newest first, and return the error to
+    /// report. If a reversal itself fails, the failure is added to the message
+    /// so the root cause is not lost.
+    fn undo_changes(&self, undo: &[Undo], cause: EngineError) -> EngineError {
         self.handler.handle(&Event::RollbackStart {
-            applied_count: applied.len(),
+            applied_count: undo.len(),
         });
-        for res in applied.iter().rev() {
-            self.provider.destroy(res)?;
-            self.handler
-                .handle(&Event::ResourceRolledBack { id: res.id.clone() });
+        let mut failures: Vec<String> = Vec::new();
+        for step in undo.iter().rev() {
+            let (id, outcome) = match step {
+                Undo::Destroy(res) => (res.id.clone(), self.provider.destroy(res)),
+                Undo::Revert { before, after } => {
+                    let desired = resource_from_applied(before);
+                    (
+                        before.id.clone(),
+                        self.provider.update(after, &desired).map(|_| ()),
+                    )
+                }
+                Undo::Recreate(before) => {
+                    let desired = resource_from_applied(before);
+                    (
+                        before.id.clone(),
+                        self.provider.create(&desired).map(|_| ()),
+                    )
+                }
+            };
+            match outcome {
+                Ok(()) => self.handler.handle(&Event::ResourceRolledBack { id }),
+                Err(e) => failures.push(format!("{id}: {e}")),
+            }
         }
         self.handler.handle(&Event::RollbackComplete);
-        Ok(())
+        if failures.is_empty() {
+            cause
+        } else {
+            EngineError::Provider(format!(
+                "{cause}; rollback incomplete: {}",
+                failures.join("; ")
+            ))
+        }
+    }
+}
+
+/// How to reverse one change made during an apply.
+enum Undo {
+    /// A resource was created: destroy it.
+    Destroy(AppliedResource),
+    /// A resource was updated: send it back to `before`.
+    Revert {
+        before: AppliedResource,
+        after: AppliedResource,
+    },
+    /// A resource was destroyed: create it again from its prior record.
+    Recreate(AppliedResource),
+}
+
+/// Rebuild a desired [`Resource`] from a recorded one, used to revert an update.
+fn resource_from_applied(applied: &AppliedResource) -> Resource {
+    let name = applied
+        .id
+        .split_once('.')
+        .map(|(_, n)| n)
+        .unwrap_or(&applied.id)
+        .to_string();
+    Resource {
+        id: applied.id.clone(),
+        type_name: applied.type_name.clone(),
+        name,
+        attributes: applied.attributes.clone(),
     }
 }
 
@@ -367,5 +481,229 @@ mod tests {
         let exec = Executor::new(FailingProvider, Box::new(NoopHandler));
         let result = exec.apply(&doc, &plan, &State::new());
         assert!(matches!(result, Err(EngineError::Provider(_))));
+    }
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+    use crate::observability::NoopHandler;
+    use crate::plan_document_with_state;
+    use crate::provider::{MockProvider, ProviderRouter};
+    use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tpt_bastion_ir::IR_VERSION;
+
+    fn bucket(acl: &str) -> Resource {
+        let mut attributes = BTreeMap::new();
+        attributes.insert("bucket".to_string(), Value::String("b1".into()));
+        attributes.insert("acl".to_string(), Value::String(acl.into()));
+        Resource {
+            id: "aws_s3_bucket.b".into(),
+            type_name: "aws_s3_bucket".into(),
+            name: "b".into(),
+            attributes,
+        }
+    }
+
+    fn doc(acl: &str) -> Document {
+        Document {
+            ir_version: IR_VERSION,
+            config: None,
+            variables: vec![],
+            resources: vec![bucket(acl)],
+            modules: vec![],
+            outputs: vec![],
+        }
+    }
+
+    fn applied(r: &Resource) -> AppliedResource {
+        AppliedResource {
+            id: r.id.clone(),
+            type_name: r.type_name.clone(),
+            attributes: r.attributes.clone(),
+        }
+    }
+
+    /// Counts each operation; `fail_update` simulates a provider refusing an update.
+    #[derive(Default)]
+    struct Counting {
+        creates: AtomicUsize,
+        updates: AtomicUsize,
+        destroys: AtomicUsize,
+        fail_update: bool,
+    }
+
+    impl Provider for Counting {
+        fn create(&self, r: &Resource) -> Result<AppliedResource, EngineError> {
+            self.creates.fetch_add(1, Ordering::SeqCst);
+            Ok(applied(r))
+        }
+        fn update(
+            &self,
+            _current: &AppliedResource,
+            desired: &Resource,
+        ) -> Result<AppliedResource, EngineError> {
+            self.updates.fetch_add(1, Ordering::SeqCst);
+            if self.fail_update {
+                return Err(EngineError::Provider("update refused".into()));
+            }
+            Ok(applied(desired))
+        }
+        fn destroy(&self, _: &AppliedResource) -> Result<(), EngineError> {
+            self.destroys.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    fn initial_state(acl: &str) -> State {
+        let d = doc(acl);
+        let plan = crate::plan_document(&d).unwrap();
+        Executor::new(MockProvider, Box::new(NoopHandler))
+            .apply(&d, &plan, &State::new())
+            .unwrap()
+    }
+
+    #[test]
+    fn unchanged_resource_is_not_touched() {
+        let prior = initial_state("private");
+        let d = doc("private");
+        let plan = plan_document_with_state(&d, &prior).unwrap();
+        assert_eq!(plan.unchanged, 1);
+        assert_eq!(plan.to_update, 0);
+
+        let exec = Executor::new(Counting::default(), Box::new(NoopHandler));
+        let state = exec.apply(&d, &plan, &prior).unwrap();
+        assert_eq!(exec.provider.creates.load(Ordering::SeqCst), 0);
+        assert_eq!(exec.provider.updates.load(Ordering::SeqCst), 0);
+        assert_eq!(state.resources.len(), 1);
+    }
+
+    #[test]
+    fn changed_attribute_calls_update_not_create() {
+        let prior = initial_state("private");
+        let d = doc("public");
+        let plan = plan_document_with_state(&d, &prior).unwrap();
+        assert_eq!(plan.to_update, 1);
+
+        let exec = Executor::new(Counting::default(), Box::new(NoopHandler));
+        let state = exec.apply(&d, &plan, &prior).unwrap();
+        assert_eq!(exec.provider.updates.load(Ordering::SeqCst), 1);
+        assert_eq!(exec.provider.creates.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            state.resources[0].attributes.get("acl"),
+            Some(&Value::String("public".into()))
+        );
+    }
+
+    #[test]
+    fn failed_update_does_not_destroy_the_resource() {
+        let prior = initial_state("private");
+        let d = doc("public");
+        let plan = plan_document_with_state(&d, &prior).unwrap();
+
+        let provider = Counting {
+            fail_update: true,
+            ..Counting::default()
+        };
+        let exec = Executor::new(provider, Box::new(NoopHandler));
+        let result = exec.apply(&d, &plan, &prior);
+        assert!(matches!(result, Err(EngineError::Provider(_))));
+        assert_eq!(exec.provider.destroys.load(Ordering::SeqCst), 0);
+    }
+
+    /// Stamps every created resource with the name of the provider that made it.
+    struct Tagged(&'static str);
+
+    impl Provider for Tagged {
+        fn create(&self, r: &Resource) -> Result<AppliedResource, EngineError> {
+            let mut a = applied(r);
+            a.attributes
+                .insert("provider".into(), Value::String(self.0.into()));
+            Ok(a)
+        }
+        fn destroy(&self, _: &AppliedResource) -> Result<(), EngineError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn failed_delete_recreates_resources_already_destroyed() {
+        /// Refuses to destroy one resource and counts recreations.
+        struct RefuseDestroy {
+            refuse: &'static str,
+            creates: AtomicUsize,
+        }
+        impl Provider for RefuseDestroy {
+            fn create(&self, r: &Resource) -> Result<AppliedResource, EngineError> {
+                self.creates.fetch_add(1, Ordering::SeqCst);
+                Ok(applied(r))
+            }
+            fn destroy(&self, a: &AppliedResource) -> Result<(), EngineError> {
+                if a.id == self.refuse {
+                    Err(EngineError::Provider("destroy refused".into()))
+                } else {
+                    Ok(())
+                }
+            }
+        }
+
+        let record = |id: &str| AppliedResource {
+            id: id.into(),
+            type_name: "aws_s3_bucket".into(),
+            attributes: BTreeMap::new(),
+        };
+        let prior = State::from_applied(vec![record("aws_s3_bucket.a"), record("aws_s3_bucket.b")]);
+        // The document declares nothing, so both prior resources are deleted.
+        // Deletes run in reverse order: `b` is destroyed first, then `a` fails.
+        let empty = Document {
+            ir_version: IR_VERSION,
+            config: None,
+            variables: vec![],
+            resources: vec![],
+            modules: vec![],
+            outputs: vec![],
+        };
+        let plan = plan_document_with_state(&empty, &prior).unwrap();
+
+        let exec = Executor::new(
+            RefuseDestroy {
+                refuse: "aws_s3_bucket.a",
+                creates: AtomicUsize::new(0),
+            },
+            Box::new(NoopHandler),
+        );
+        assert!(exec.apply(&empty, &plan, &prior).is_err());
+        assert_eq!(
+            exec.provider.creates.load(Ordering::SeqCst),
+            1,
+            "`b` was destroyed before the failure and must be recreated"
+        );
+    }
+
+    #[test]
+    fn router_picks_the_longest_matching_prefix() {
+        let router = ProviderRouter::new()
+            .route("aws_", Box::new(Tagged("aws")))
+            .route("aws_s3_", Box::new(Tagged("s3")));
+
+        let s3 = router.create(&bucket("private")).unwrap();
+        assert_eq!(
+            s3.attributes.get("provider"),
+            Some(&Value::String("s3".into()))
+        );
+
+        let mut ec2 = bucket("x");
+        ec2.id = "aws_instance.i".into();
+        ec2.type_name = "aws_instance".into();
+        let ec2 = router.create(&ec2).unwrap();
+        assert_eq!(
+            ec2.attributes.get("provider"),
+            Some(&Value::String("aws".into()))
+        );
+
+        let mut gcp = bucket("x");
+        gcp.type_name = "gcp_storage_bucket".into();
+        assert!(matches!(router.create(&gcp), Err(EngineError::Provider(_))));
     }
 }
