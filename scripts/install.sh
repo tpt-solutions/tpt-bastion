@@ -37,12 +37,25 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+is_musl() {
+  # ldd on musl prints "musl libc"; the loader file is a more reliable signal.
+  if ls /lib/ld-musl-*.so.1 >/dev/null 2>&1; then return 0; fi
+  ldd --version 2>&1 | grep -qi musl
+}
+
 detect_target() {
   local os arch
   os="$(uname -s)"
   arch="$(uname -m)"
   case "$os" in
-    Linux) os="unknown-linux-gnu" ;;
+    Linux)
+      # Prefer the static musl build on musl systems (e.g. Alpine). Only
+      # x86_64 musl is published; other arches keep the gnu build.
+      os="unknown-linux-gnu"
+      case "$(uname -m)" in
+        x86_64|amd64) is_musl && os="unknown-linux-musl" ;;
+      esac
+      ;;
     Darwin) os="apple-darwin" ;;
     *) echo "unsupported OS: $os" >&2; exit 1 ;;
   esac
@@ -79,6 +92,32 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 run curl -fLSL "$URL" -o "$TMP/$ASSET"
+
+# Verify the archive against the release's SHA256SUMS before extracting it.
+verify_checksum() {
+  curl -fLSL "https://github.com/${REPO}/releases/download/${VERSION}/SHA256SUMS" \
+    -o "$TMP/SHA256SUMS" || { echo "error: could not download SHA256SUMS" >&2; exit 1; }
+  local expected actual
+  expected="$(awk -v f="$ASSET" '$2 == f { print $1 }' "$TMP/SHA256SUMS")"
+  if [ -z "$expected" ]; then
+    echo "error: ${ASSET} is not listed in SHA256SUMS" >&2; exit 1
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$TMP/$ASSET" | awk '{print $1}')"
+  else
+    actual="$(shasum -a 256 "$TMP/$ASSET" | awk '{print $1}')"
+  fi
+  if [ "$expected" != "$actual" ]; then
+    echo "error: checksum mismatch for ${ASSET} (expected $expected, got $actual)" >&2
+    exit 1
+  fi
+  echo "checksum OK for ${ASSET}" >&2
+}
+
+if [ "$DRY_RUN" -eq 0 ]; then
+  verify_checksum
+fi
+
 run tar -xzf "$TMP/$ASSET" -C "$TMP"
 run mkdir -p "$INSTALL_DIR"
 run install -m 0755 "$TMP/$BIN" "$INSTALL_DIR/$BIN"

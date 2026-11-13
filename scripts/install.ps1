@@ -43,6 +43,17 @@ New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 try {
     $Zip = Join-Path $Tmp $Asset
     Invoke-Step -Label "download $Url" -Block { Invoke-WebRequest -Uri $Url -OutFile $Zip }
+    # Verify the archive against the release's SHA256SUMS before extracting it.
+    if (-not $DryRun) {
+        $SumsUrl = "https://github.com/$Repo/releases/download/$Version/SHA256SUMS"
+        $Sums = (Invoke-WebRequest -Uri $SumsUrl -UseBasicParsing).Content -split "`n"
+        $Line = $Sums | Where-Object { $_ -match "\s\*?$([regex]::Escape($Asset))\s*$" } | Select-Object -First 1
+        if (-not $Line) { throw "$Asset is not listed in SHA256SUMS" }
+        $Expected = ($Line.Trim() -split '\s+')[0]
+        $Actual = (Get-FileHash -Algorithm SHA256 -Path $Zip).Hash
+        if ($Expected -ine $Actual) { throw "checksum mismatch for $Asset (expected $Expected, got $Actual)" }
+        Write-Host "checksum OK for $Asset"
+    }
     Invoke-Step -Label "expand $Zip" -Block { Expand-Archive -Path $Zip -DestinationPath $Tmp -Force }
     Invoke-Step -Label "mkdir $To" -Block { New-Item -ItemType Directory -Force -Path $To | Out-Null }
     $Exe = Join-Path $Tmp "$Bin.exe"

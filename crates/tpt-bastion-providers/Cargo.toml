@@ -16,8 +16,8 @@ documentation = "https://docs.rs/tpt-bastion-providers"
 readme = "README.md"
 
 [dependencies]
-tpt-bastion-ir = { path = "../tpt-bastion-ir" }
-tpt-bastion-engine = { path = "../tpt-bastion-engine" }
+tpt-bastion-ir = { path = "../tpt-bastion-ir", version = "0.1.0" }
+tpt-bastion-engine = { path = "../tpt-bastion-engine", version = "0.1.0" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

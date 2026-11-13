@@ -16,9 +16,9 @@ documentation = "https://docs.rs/tpt-bastion-provider-kubernetes"
 readme = "README.md"
 
 [dependencies]
-tpt-bastion-ir = { path = "../../crates/tpt-bastion-ir" }
-tpt-bastion-engine = { path = "../../crates/tpt-bastion-engine" }
-tpt-bastion-providers = { path = "../../crates/tpt-bastion-providers" }
+tpt-bastion-ir = { path = "../../crates/tpt-bastion-ir", version = "0.1.0" }
+tpt-bastion-engine = { path = "../../crates/tpt-bastion-engine", version = "0.1.0" }
+tpt-bastion-providers = { path = "../../crates/tpt-bastion-providers", version = "0.1.0" }
 serde = { workspace = true }
 
 [package.metadata.docs.rs]

@@ -16,7 +16,7 @@ documentation = "https://docs.rs/tpt-bastion-dsl"
 readme = "README.md"
 
 [dependencies]
-tpt-bastion-ir = { path = "../tpt-bastion-ir" }
+tpt-bastion-ir = { path = "../tpt-bastion-ir", version = "0.1.0" }
 serde.workspace = true
 thiserror.workspace = true
 

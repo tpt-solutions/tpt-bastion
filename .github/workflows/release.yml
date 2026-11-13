@@ -76,7 +76,7 @@ jobs:
         if: ${{ !contains(matrix.target, 'windows') }}
         run: |
           cd target/${{ matrix.target }}/release
-          tar -czf ../../../${{ env.BIN }}-${{ matrix.target }}.tar.gz ${{ env.BIN }}
+          tar -czf ../../../${{ env.BIN }}-${{ github.ref_name }}-${{ matrix.target }}.tar.gz ${{ env.BIN }}
           cd ../../..
         shell: bash
 
@@ -84,7 +84,7 @@ jobs:
         if: ${{ contains(matrix.target, 'windows') }}
         run: |
           cd target/${{ matrix.target }}/release
-          Compress-Archive -Path ${{ env.BIN }}.exe -DestinationPath ../../${{ env.BIN }}-${{ matrix.target }}.zip
+          Compress-Archive -Path ${{ env.BIN }}.exe -DestinationPath ../../${{ env.BIN }}-${{ github.ref_name }}-${{ matrix.target }}.zip
         shell: pwsh
 
       - name: Upload artifact
@@ -92,8 +92,8 @@ jobs:
         with:
           name: ${{ env.BIN }}-${{ matrix.target }}
           path: |
-            ${{ env.BIN }}-${{ matrix.target }}.tar.gz
-            ${{ env.BIN }}-${{ matrix.target }}.zip
+            ${{ env.BIN }}-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
+            ${{ env.BIN }}-${{ github.ref_name }}-${{ matrix.target }}.zip
           if-no-files-found: ignore
 
   docker:
@@ -140,6 +140,14 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+      - name: Generate SHA256SUMS
+        # The install scripts download this file and verify each archive
+        # against it before installing.
+        run: |
+          cd artifacts
+          sha256sum bastion-* > SHA256SUMS
+          cat SHA256SUMS
+        shell: bash
       - name: Generate changelog
         id: changelog
         run: |
@@ -172,13 +180,20 @@ jobs:
       - name: Publish crates in dependency order
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        # Order follows the path dependencies: each crate's workspace
+        # dependencies appear earlier in this list. Failures stop the release
+        # (no `|| true`) and every crate is verified (no `--no-verify`).
         run: |
+          set -euo pipefail
           for crate in \
-            tpt-bastion-ir tpt-bastion-dsl tpt-bastion-engine tpt-bastion-state tpt-bastion-providers tpt-bastion-cli \
+            tpt-bastion-ir tpt-bastion-events tpt-bastion-dsl tpt-bastion-engine \
+            tpt-bastion-state tpt-bastion-providers tpt-bastion-ui \
             tpt-bastion-provider-aws tpt-bastion-provider-gcp tpt-bastion-provider-azure \
-            tpt-bastion-provider-kubernetes tpt-bastion-provider-terraform-shim; do
+            tpt-bastion-provider-kubernetes tpt-bastion-provider-terraform-shim \
+            tpt-bastion-cli; do
             echo "publishing $crate"
-            cargo publish -p "$crate" --no-verify || true
+            cargo publish -p "$crate"
+            # Give the registry index time to pick up the crate before dependents publish.
             sleep 20
           done
         shell: bash
