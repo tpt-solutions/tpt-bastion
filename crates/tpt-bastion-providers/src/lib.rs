@@ -16,9 +16,9 @@
 //!   (in-process, ideal for tests and built-ins) and [`abi::SubprocessRuntime`]
 //!   (each provider runs as an isolated OS process, confined on Unix with
 //!   resource limits and a read-only [`sandbox`]).
-//! - **Sandboxing** — [`sandbox`] confines subprocess providers (resource limits
-//!   + read-only `landlock` on Linux) so a misbehaving provider cannot exhaust
-//!   the host or tamper with state/credentials.
+//! - **Sandboxing** — [`sandbox`] confines subprocess providers (resource
+//!   limits + read-only `landlock` on Linux) so a misbehaving provider cannot
+//!   exhaust the host or tamper with state/credentials.
 //! - **Engine integration** — [`plugin::PluginProvider`] adapts any loaded
 //!   plugin to the engine's [`Provider`](tpt_bastion_engine::Provider) trait, so the
 //!   executor applies plugin-backed infrastructure transparently.

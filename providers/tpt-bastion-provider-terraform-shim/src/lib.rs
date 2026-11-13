@@ -4,19 +4,29 @@
 //!
 //! This shim lets Bastion drive existing Terraform providers *today* without
 //! reimplementing them. For each resource it renders an HCL `resource` block and
-//! shells out to `terraform`/`tofu` (`BASTION_TF_BIN`, default `terraform`) to
-//! apply it. This is the pragmatic interop path; the long-term path is to speak
-//! the Terraform plugin gRPC protocol directly (see `terraform_plugin_protocol`
-//! below), which removes the CLI dependency and lets Bastion consume a
-//! provider's schema natively.
+//! shells out to `terraform`/`tofu` (`BASTION_TF_BIN`, default `terraform`).
+//!
+//! # Working directories and state
+//!
+//! Each Bastion resource gets its own persistent working directory:
+//! `$BASTION_TF_STATE_DIR/<resource id>` (default `.bastion/terraform`, relative
+//! to the current directory). The directory holds the generated `main.tf` and
+//! Terraform's own `terraform.tfstate`. The state must survive between runs,
+//! because `delete` can only destroy what Terraform recorded when it created the
+//! resource. Runs against one directory are serialized with a per-directory lock.
+//!
+//! `delete` fails when no Terraform state exists for the resource. It never
+//! reports success for a destroy that did not happen.
 //!
 //! The shim is intentionally permissive: any `type_name` is passed through to
 //! HCL, so coverage grows as you install upstream providers. References are not
 //! yet translated (HCL needs concrete values); resolve them in the DSL first.
 
+use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 use tpt_bastion_engine::provider::AppliedResource;
 use tpt_bastion_ir::Value;
 use tpt_bastion_providers::error::ProviderError;
@@ -24,6 +34,41 @@ use tpt_bastion_providers::plugin::{ProviderPlugin, ResourceRequest};
 use tpt_bastion_providers::schema::{
     AttributeSpec, LifecycleOps, ProviderSchema, ResourceTypeSpec, ValueType,
 };
+
+/// Name used in error messages.
+const PROVIDER: &str = "terraform-shim";
+
+/// One lock per working directory, so two runs never use the same directory at once.
+static DIR_LOCKS: Mutex<Option<HashMap<PathBuf, Arc<Mutex<()>>>>> = Mutex::new(None);
+
+fn internal(message: impl Into<String>) -> ProviderError {
+    ProviderError::Internal {
+        provider: PROVIDER.into(),
+        message: message.into(),
+    }
+}
+
+/// The per-directory lock for `dir`, creating it on first use.
+fn dir_lock(dir: &Path) -> Arc<Mutex<()>> {
+    let mut guard = DIR_LOCKS.lock().unwrap_or_else(|e| e.into_inner());
+    let map = guard.get_or_insert_with(HashMap::new);
+    map.entry(dir.to_path_buf())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
+
+/// Map a resource id to a safe directory name (`aws_s3_bucket.demo` stays readable).
+fn dir_name(id: &str) -> String {
+    id.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
 
 /// The Terraform-compatible shim provider.
 pub struct TerraformShimProvider;
@@ -39,6 +84,18 @@ impl TerraformShimProvider {
         std::env::var("BASTION_TF_BIN").unwrap_or_else(|_| "terraform".to_string())
     }
 
+    /// Root directory holding one working directory per resource.
+    fn state_root() -> PathBuf {
+        std::env::var_os("BASTION_TF_STATE_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(".bastion").join("terraform"))
+    }
+
+    /// The working directory for one resource.
+    fn resource_dir(id: &str) -> PathBuf {
+        Self::state_root().join(dir_name(id))
+    }
+
     /// Render a Bastion resource as an HCL `resource` block.
     pub fn to_hcl(req: &ResourceRequest) -> Result<String, ProviderError> {
         let label = req
@@ -52,7 +109,7 @@ impl TerraformShimProvider {
                 Some(rendered) => body.push_str(&format!("  {key} = {rendered}\n")),
                 None => {
                     return Err(ProviderError::Rejected {
-                        provider: "terraform-shim".into(),
+                        provider: PROVIDER.into(),
                         message: format!(
                             "attribute `{key}` holds a reference; resolve it before applying via the shim"
                         ),
@@ -66,47 +123,70 @@ impl TerraformShimProvider {
         ))
     }
 
-    fn apply_via_cli(req: &ResourceRequest) -> Result<(), ProviderError> {
-        let hcl = Self::to_hcl(req)?;
-        let dir = std::env::temp_dir().join(format!("bastion-tf-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).map_err(|e| ProviderError::Internal {
-            provider: "terraform-shim".into(),
-            message: format!("create temp dir: {e}"),
-        })?;
-        let tf_path: PathBuf = dir.join("main.tf");
-        let mut f = std::fs::File::create(&tf_path).map_err(|e| ProviderError::Internal {
-            provider: "terraform-shim".into(),
-            message: format!("write main.tf: {e}"),
-        })?;
-        writeln!(f, "{hcl}").map_err(|e| ProviderError::Internal {
-            provider: "terraform-shim".into(),
-            message: format!("write main.tf: {e}"),
-        })?;
-        drop(f);
+    /// Write `main.tf` into `dir`, replacing any previous version.
+    fn write_main_tf(dir: &Path, hcl: &str) -> Result<(), ProviderError> {
+        let path = dir.join("main.tf");
+        let mut f = std::fs::File::create(&path)
+            .map_err(|e| internal(format!("write {}: {e}", path.display())))?;
+        writeln!(f, "{hcl}").map_err(|e| internal(format!("write {}: {e}", path.display())))
+    }
 
-        let bin = Self::tf_bin();
-        let init = Command::new(&bin)
-            .args(["init", "-input=false"])
-            .current_dir(&dir)
-            .status();
-        let apply = Command::new(&bin)
-            .args(["apply", "-auto-approve", "-input=false"])
-            .current_dir(&dir)
-            .status();
-
-        let _ = std::fs::remove_dir_all(&dir);
-
-        match (init, apply) {
-            (Ok(i), Ok(a)) if i.success() && a.success() => Ok(()),
-            (i, a) => Err(ProviderError::Internal {
-                provider: "terraform-shim".into(),
-                message: format!(
-                    "{bin} exited (init ok={}, apply ok={}); is it installed?",
-                    i.map(|s| s.success()).unwrap_or(false),
-                    a.map(|s| s.success()).unwrap_or(false)
-                ),
-            }),
+    /// Run `bin args...` in `dir`, failing on spawn errors and non-zero exits.
+    fn run_tf(bin: &str, args: &[&str], dir: &Path) -> Result<(), ProviderError> {
+        let status = Command::new(bin)
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .map_err(|e| internal(format!("could not run `{bin}` (is it installed?): {e}")))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(internal(format!(
+                "`{bin} {}` failed with {status} in {}",
+                args.join(" "),
+                dir.display()
+            )))
         }
+    }
+
+    /// Initialize the working directory once, then run `args`.
+    fn run_in_dir(dir: &Path, args: &[&str]) -> Result<(), ProviderError> {
+        let bin = Self::tf_bin();
+        if !dir.join(".terraform").exists() {
+            Self::run_tf(&bin, &["init", "-input=false"], dir)?;
+        }
+        Self::run_tf(&bin, args, dir)
+    }
+
+    fn create_in_dir(req: &ResourceRequest) -> Result<(), ProviderError> {
+        let hcl = Self::to_hcl(req)?;
+        let dir = Self::resource_dir(&req.id);
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| internal(format!("create {}: {e}", dir.display())))?;
+        let lock = dir_lock(&dir);
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        Self::write_main_tf(&dir, &hcl)?;
+        Self::run_in_dir(&dir, &["apply", "-auto-approve", "-input=false"])
+    }
+
+    fn delete_in_dir(req: &ResourceRequest) -> Result<(), ProviderError> {
+        let hcl = Self::to_hcl(req)?;
+        let dir = Self::resource_dir(&req.id);
+        let lock = dir_lock(&dir);
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+
+        if !dir.join("terraform.tfstate").exists() {
+            return Err(internal(format!(
+                "no Terraform state for `{}` in {}; nothing to destroy",
+                req.id,
+                dir.display()
+            )));
+        }
+        Self::write_main_tf(&dir, &hcl)?;
+        Self::run_in_dir(&dir, &["destroy", "-auto-approve", "-input=false"])?;
+        // The resource is gone, so its state and working files are no longer needed.
+        std::fs::remove_dir_all(&dir)
+            .map_err(|e| internal(format!("remove {}: {e}", dir.display())))
     }
 }
 
@@ -118,7 +198,7 @@ impl Default for TerraformShimProvider {
 
 impl ProviderPlugin for TerraformShimProvider {
     fn name(&self) -> &str {
-        "terraform-shim"
+        PROVIDER
     }
 
     fn version(&self) -> &str {
@@ -128,7 +208,7 @@ impl ProviderPlugin for TerraformShimProvider {
     fn schema(&self) -> ProviderSchema {
         // Permissive: every upstream Terraform resource type is accepted. A future
         // gRPC-based implementation will populate this from the provider's schema.
-        ProviderSchema::builder("terraform-shim", "0.1.0")
+        ProviderSchema::builder(PROVIDER, "0.1.0")
             .resource(
                 ResourceTypeSpec::builder("*")
                     .description("Any Terraform/OpenTofu resource type, passed through to HCL.")
@@ -145,7 +225,7 @@ impl ProviderPlugin for TerraformShimProvider {
     }
 
     fn create(&self, req: ResourceRequest) -> Result<AppliedResource, ProviderError> {
-        Self::apply_via_cli(&req)?;
+        Self::create_in_dir(&req)?;
         Ok(AppliedResource {
             id: req.id,
             type_name: req.type_name,
@@ -154,26 +234,7 @@ impl ProviderPlugin for TerraformShimProvider {
     }
 
     fn delete(&self, req: ResourceRequest) -> Result<(), ProviderError> {
-        let hcl = Self::to_hcl(&req)?;
-        let dir = std::env::temp_dir().join(format!("bastion-tf-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).ok();
-        let tf_path = dir.join("main.tf");
-        if let Ok(mut f) = std::fs::File::create(&tf_path) {
-            let _ = writeln!(f, "{hcl}");
-        }
-        let bin = Self::tf_bin();
-        let status = Command::new(&bin)
-            .args(["destroy", "-auto-approve", "-input=false"])
-            .current_dir(&dir)
-            .status();
-        let _ = std::fs::remove_dir_all(&dir);
-        match status {
-            Ok(s) if s.success() => Ok(()),
-            _ => Err(ProviderError::Internal {
-                provider: "terraform-shim".into(),
-                message: format!("{bin} destroy failed; is it installed?"),
-            }),
-        }
+        Self::delete_in_dir(&req)
     }
 }
 
@@ -249,5 +310,22 @@ mod tests {
             attributes,
         };
         assert!(TerraformShimProvider::to_hcl(&r).is_err());
+    }
+
+    #[test]
+    fn resource_ids_map_to_distinct_safe_dirs() {
+        assert_eq!(dir_name("aws_s3_bucket.demo"), "aws_s3_bucket.demo");
+        assert_eq!(dir_name("a/b\\c:d"), "a_b_c_d");
+        assert_ne!(dir_name("x.a"), dir_name("x.b"));
+    }
+
+    #[test]
+    fn delete_without_state_is_an_error_not_a_success() {
+        let root = std::env::temp_dir().join(format!("bastion-tf-test-{}", std::process::id()));
+        std::env::set_var("BASTION_TF_STATE_DIR", &root);
+        let result = TerraformShimProvider::new().delete(req());
+        std::env::remove_var("BASTION_TF_STATE_DIR");
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(matches!(result, Err(ProviderError::Internal { .. })));
     }
 }

@@ -4,9 +4,9 @@
 //!
 //! The ABI is a line-delimited JSON protocol ([`AbiRequest`] / [`AbiResponse`])
 //! over a bidirectional byte stream (typically a child process's stdin/stdout).
-//! It is deliberately transport-agnostic: the same messages drive an in-process
-//! [`crate::plugin::NativeRuntime`] today and a Wasm host tomorrow, because the
-//! Wasm module would simply call the same `create`/`delete`/`schema` entry points.
+//! The messages are independent of the transport. An in-process
+//! [`crate::plugin::NativeRuntime`] and the subprocess runtime both use them.
+//! No Wasm host exists yet.
 //!
 //! [`SubprocessRuntime`] is the production isolation boundary: each provider runs
 //! as its own OS process, so a crashing or misbehaving provider cannot corrupt
@@ -17,6 +17,8 @@ use crate::plugin::{DataSourceRequest, ProviderPlugin, ProviderRuntime, Resource
 use crate::schema::ProviderSchema;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -164,9 +166,14 @@ impl ProviderRuntime for SubprocessRuntime {
         // limits + read-only landlock. Best-effort on non-Unix platforms.
         #[cfg(unix)]
         {
-            cmd.pre_exec(|| {
-                crate::sandbox::confine_current_process(crate::sandbox::Limits::default())
-            });
+            // SAFETY: the closure runs in the forked child before exec and only
+            // calls `confine_current_process`, which performs setrlimit and
+            // landlock syscalls and touches no shared state.
+            unsafe {
+                cmd.pre_exec(|| {
+                    crate::sandbox::confine_current_process(crate::sandbox::Limits::default())
+                });
+            }
         }
 
         let mut child = cmd.spawn().map_err(|e| RuntimeError::Process {
