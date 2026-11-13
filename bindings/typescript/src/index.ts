@@ -22,6 +22,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { IR_VERSION } from "./ir-version.js";
 
 /** A compile-time IR value, mirroring `tpt_bastion_ir::Value`. */
 export type BastionValue =
@@ -184,7 +185,7 @@ export function toIrJson(doc: BastionDocument): string {
 /** Convert a {@link BastionDocument} into the IR JSON shape. */
 export function toIr(doc: BastionDocument): unknown {
   return {
-    ir_version: 1,
+    ir_version: IR_VERSION,
     config: doc.config
       ? {
           name: doc.config.name ?? null,

@@ -26,6 +26,8 @@ import tempfile
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from ._ir_version import IR_VERSION
+
 __all__ = [
     "BastionDocument",
     "s",
@@ -174,7 +176,7 @@ def to_bcl(doc: BastionDocument) -> str:
 def to_ir(doc: BastionDocument) -> dict:
     """Convert a document into the IR JSON shape."""
     return {
-        "ir_version": 1,
+        "ir_version": IR_VERSION,
         "config": (
             {
                 "name": doc.config.get("name") if doc.config else None,

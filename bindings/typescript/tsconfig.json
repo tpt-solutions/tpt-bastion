@@ -8,7 +8,12 @@
     "noUnusedParameters": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": []
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/**/*.ts", "examples/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "examples/**/*.ts"
+  ]
 }
