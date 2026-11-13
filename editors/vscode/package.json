@@ -1,0 +1,74 @@
+{
+  "name": "bastion-vscode",
+  "displayName": "TPT Bastion",
+  "description": "Language support for Bastion .bcl files: syntax highlighting, snippets, diagnostics, formatting, hover, go-to-definition, and completion (via `bastion lsp`).",
+  "version": "0.1.0",
+  "publisher": "tpt",
+  "license": "Apache-2.0 OR MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tpt/bastion"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:bcl"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "bcl",
+        "aliases": [
+          "Bastion",
+          "bcl"
+        ],
+        "extensions": [
+          ".bcl"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "bcl",
+        "scopeName": "source.bcl",
+        "path": "./syntaxes/bcl.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "bcl",
+        "path": "./snippets/bcl.json"
+      }
+    ],
+    "configuration": {
+      "title": "TPT Bastion",
+      "properties": {
+        "bastion.serverPath": {
+          "type": "string",
+          "default": "bastion",
+          "description": "Path to the bastion executable. The extension runs `bastion lsp`."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p ./",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.26.0",
+    "typescript": "^5.4.0"
+  }
+}

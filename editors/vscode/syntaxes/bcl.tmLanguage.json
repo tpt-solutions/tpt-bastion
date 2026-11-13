@@ -1,0 +1,64 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Bastion",
+  "scopeName": "source.bcl",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#block-keywords" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#constants" },
+    { "include": "#references" },
+    { "include": "#attribute-keys" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.bcl", "match": "//.*$" },
+        {
+          "name": "comment.block.bcl",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "block-keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.block.bcl",
+          "match": "\\b(resource|module|variable|output|config)\\b"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.bcl",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        { "name": "constant.character.escape.bcl", "match": "\\\\[nrt\"\\\\]" },
+        { "name": "invalid.illegal.escape.bcl", "match": "\\\\." }
+      ]
+    },
+    "numbers": {
+      "name": "constant.numeric.bcl",
+      "match": "\\b-?[0-9]+(\\.[0-9]+)?\\b"
+    },
+    "constants": {
+      "name": "constant.language.bcl",
+      "match": "\\b(true|false|null)\\b"
+    },
+    "references": {
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "variable.other.reference.bcl" },
+        "2": { "name": "variable.other.property.bcl" }
+      }
+    },
+    "attribute-keys": {
+      "match": "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(=|\\{)",
+      "captures": {
+        "1": { "name": "entity.other.attribute-name.bcl" }
+      }
+    }
+  }
+}

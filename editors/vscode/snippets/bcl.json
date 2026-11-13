@@ -1,0 +1,22 @@
+{
+  "Resource": {
+    "prefix": "resource",
+    "body": ["resource ${1:aws_s3_bucket} ${2:name} {", "    ${3:bucket} = \"${4:value}\"", "}"],
+    "description": "A resource block"
+  },
+  "Variable": {
+    "prefix": "variable",
+    "body": ["variable ${1:name} {", "    default = \"${2:value}\"", "}"],
+    "description": "A variable block with a default"
+  },
+  "Output": {
+    "prefix": "output",
+    "body": ["output ${1:name} {", "    value = ${2:resource.attribute}", "}"],
+    "description": "An output block"
+  },
+  "Config": {
+    "prefix": "config",
+    "body": ["config {", "    name = \"${1:project}\"", "}"],
+    "description": "A config block"
+  }
+}
